@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="zh-CN" data-type="software">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="page-type" content="software">
+  <meta name="site-kind" content="software">
+  <meta name="color-scheme" content="light">
+  <meta name="description" content="OneSocks 节点与订阅管理">
+  <title>OneSocks · 节点管理</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/assets/app.css">
+  <script src="/assets/app.js" defer></script>
+</head>
+<body>
+  <!-- Embedded node and subscription management. -->
+  <svg class="icon-sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <symbol id="icon-nodes" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></symbol>
+    <symbol id="icon-link" viewBox="0 0 24 24"><path d="m10 13 4-4m-6 6-1 1a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0m2 2 1-1a4 4 0 0 1 6 6l-4 4a4 4 0 0 1-6 0"/></symbol>
+    <symbol id="icon-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></symbol>
+    <symbol id="icon-lock" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="11" rx="3"/><path d="M8 10V7a4 4 0 0 1 8 0v3m-4 5v2"/></symbol>
+  </svg>
+  <a class="skip-link" href="#main-content">跳到主要内容</a>
+
+  <section id="boot-panel" class="entry-panel" aria-labelledby="boot-title">
+    <div class="wordmark">onesocks</div>
+    <h1 id="boot-title">正在连接服务</h1>
+    <p id="boot-message" aria-live="polite">加载节点与订阅…</p>
+    <button id="boot-retry" class="button primary" type="button" hidden>重新连接</button>
+    <noscript><p>请启用 JavaScript，以管理节点和订阅。</p></noscript>
+  </section>
+
+  <section id="login-panel" class="entry-panel" aria-labelledby="login-title" hidden>
+    <div class="wordmark">onesocks</div>
+    <div class="entry-icon"><svg class="icon" aria-hidden="true"><use href="#icon-lock"/></svg></div>
+    <h1 id="login-title">登录管理后台</h1>
+    <form id="login-form">
+      <label for="api-token">API token</label>
+      <input id="api-token" type="text" autocomplete="off" spellcheck="false" required>
+      <p id="login-error" class="form-error" role="alert" hidden></p>
+      <button id="login-submit" class="button primary" type="submit">登录后台</button>
+    </form>
+  </section>
+
+  <div id="app" class="app-shell" hidden>
+    <aside class="sidebar" aria-label="管理导航">
+      <div class="brand"><span class="brand-mark"><svg class="icon" aria-hidden="true"><use href="#icon-link"/></svg></span><div class="brand-name"><div class="wordmark">onesocks</div></div></div>
+      <nav class="navigation" aria-label="管理页面">
+        <button id="nodes-tab" class="nav-item active" type="button" aria-current="page"><svg class="icon" aria-hidden="true"><use href="#icon-nodes"/></svg><span class="nav-label">节点池</span><span id="nodes-count" class="count">0</span></button>
+        <button id="subscriptions-tab" class="nav-item" type="button"><svg class="icon" aria-hidden="true"><use href="#icon-link"/></svg><span class="nav-label">订阅管理</span><span id="subscriptions-count" class="count">0</span></button>
+      </nav>
+      <div class="sidebar-footer"><span id="version-value" class="version">onesocks</span></div>
+    </aside>
+
+    <div class="workspace-shell">
+      <main id="main-content" class="container" tabindex="-1">
+        <header class="page-header">
+          <div><h1 id="page-title">节点池</h1><div class="header-status" aria-live="polite"><span class="service-summary"><span id="status-dot" class="status-dot" aria-hidden="true"></span><span id="service-state">正在连接</span></span><span id="runtime-info" class="muted"></span><button id="logout-button" class="text-button" type="button" hidden>退出登录</button></div></div>
+          <div class="header-actions"><button id="reload-button" class="button secondary" type="button">刷新列表</button><button id="add-button" class="button primary" type="button">＋ 添加订阅</button></div>
+        </header>
+        <p id="update-hint" class="update-hint" aria-live="polite"></p>
+
+        <section id="nodes-panel" aria-label="节点池" data-screen="free" data-ui>
+            <div class="list-panel">
+              <div class="toolbar">
+                <label class="search-field" for="node-search"><svg class="icon" aria-hidden="true"><use href="#icon-search"/></svg><span class="sr-only">搜索节点、IP 或地区</span><input id="node-search" type="search" placeholder="搜索节点、IP 或地区" autocomplete="off"></label>
+                <label class="sr-only" for="subscription-filter">按订阅筛选</label><select id="subscription-filter"><option value="">全部订阅</option></select>
+                <button id="filters-toggle" class="button secondary" type="button" aria-expanded="false" aria-controls="node-filters">筛选</button>
+                <div class="export-control"><button id="export-toggle" class="button secondary" type="button" aria-expanded="false" aria-controls="export-options">导出</button><div id="export-options" class="export-options" hidden><button type="button" data-export="csv">CSV 表格</button><button type="button" data-export="txt">SOCKS5 链接</button><button type="button" data-export="json">完整 JSON</button></div></div>
+              </div>
+              <div id="node-filters" class="node-filters" hidden>
+                <div><label for="protocol-filter">协议</label><select id="protocol-filter"><option value="">全部协议</option></select></div>
+                <div><label for="country-filter">国家/地区</label><select id="country-filter"><option value="">全部地区</option></select></div>
+                <div><label for="latency-status-filter">延迟检测</label><select id="latency-status-filter"><option value="">全部状态</option><option value="success">成功</option><option value="failed">失败</option><option value="untested">未检测</option></select></div>
+                <div><label for="ip-status-filter">IP 检测</label><select id="ip-status-filter"><option value="">全部状态</option><option value="success">成功</option><option value="failed">失败</option><option value="untested">未检测</option></select></div>
+                <div><label for="latency-max-filter">延迟上限（ms）</label><input id="latency-max-filter" type="number" min="0" step="1" placeholder="不限" inputmode="numeric"></div>
+                <div><label for="score-max-filter">评分上限</label><input id="score-max-filter" type="number" min="0" max="1" step="0.01" placeholder="不限" inputmode="decimal"></div>
+              </div>
+              <div class="table-actions">
+                <div class="probe-toolbar-actions"><button id="latency-all" class="button secondary" type="button">批量延迟探测</button><button id="ip-all" class="button secondary" type="button">批量 IP 检测</button><button id="probe-stop" class="text-button" type="button" hidden>停止检测</button></div>
+                <div class="table-order"><button id="filters-reset" class="text-button" type="button" disabled>重置</button><label class="sr-only" for="node-sort">节点排序</label><select id="node-sort"><option value="">默认排序</option><option value="name">名称排序</option><option value="latency-asc">延迟从低到高</option><option value="latency-desc">延迟从高到低</option><option value="score-asc">评分从低到高</option><option value="score-desc">评分从高到低</option></select></div>
+              </div>
+              <div class="list-meta"><span id="node-results">加载中…</span><span id="probe-progress" role="status"></span><span id="last-sync"></span></div>
+              <div id="nodes-content" class="data-surface" aria-busy="false">
+                <table class="node-table"><thead><tr><th scope="col">节点 / 协议</th><th scope="col">订阅来源</th><th scope="col">出口 IP</th><th scope="col">国家/地区</th><th scope="col">延迟</th><th scope="col">评分</th><th scope="col" class="actions-heading">操作</th></tr></thead><tbody id="nodes-body"></tbody></table>
+                <div id="nodes-empty" class="empty-state" hidden><span class="empty-icon"><svg class="icon" aria-hidden="true"><use href="#icon-nodes"/></svg></span><h2 id="nodes-empty-title">还没有节点</h2><button id="empty-add-button" class="button primary" type="button">添加第一个订阅</button></div>
+              </div>
+              <nav id="node-pagination" class="pagination" aria-label="节点分页" hidden>
+                <div class="pagination-summary"><span id="page-range"></span><label for="page-size" class="sr-only">每页节点数</label><select id="page-size"><option value="10">10 条/页</option><option value="20" selected>20 条/页</option><option value="50">50 条/页</option><option value="100">100 条/页</option></select></div>
+                <div class="pagination-controls"><button id="page-prev" class="button secondary" type="button">上一页</button><label for="page-number" class="sr-only">当前页码</label><input id="page-number" type="number" min="1" value="1" inputmode="numeric"><span>/ <span id="page-total">1</span> 页</span><button id="page-next" class="button secondary" type="button">下一页</button></div>
+              </nav>
+            </div>
+        </section>
+
+        <section id="subscriptions-panel" class="list-panel subscription-panel" aria-label="订阅管理" data-screen="free" data-ui hidden>
+          <div class="section-intro"><div><h2>订阅来源</h2></div><span id="subscription-results" class="muted"></span></div>
+          <div id="subscriptions-content" class="data-surface" aria-busy="false">
+            <table class="subscription-table"><thead><tr><th scope="col">订阅</th><th scope="col">节点</th><th scope="col">同步状态</th><th scope="col" class="actions-heading">操作</th></tr></thead><tbody id="subscriptions-body"></tbody></table>
+            <div id="subscriptions-empty" class="empty-state" hidden><span class="empty-icon"><svg class="icon" aria-hidden="true"><use href="#icon-link"/></svg></span><h2>还没有订阅</h2><button id="subscriptions-empty-add" class="button primary" type="button">添加订阅</button></div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <div id="notice" class="notice" role="status" aria-live="polite" hidden><p id="notice-message"></p><button id="notice-dismiss" class="close-button" type="button" aria-label="关闭提示">×</button></div>
+  <dialog id="connection-dialog" class="drawer connection-drawer" aria-labelledby="connection-title">
+    <div id="connection-panel" class="connection-panel">
+      <div class="panel-heading"><h2 id="connection-title">节点详情</h2><button id="connection-close" class="close-button" type="button" aria-label="关闭节点详情">×</button></div>
+      <div id="connection-details" hidden>
+        <div class="selected-node"><h3 id="selected-name"></h3><div class="selected-meta"><span id="selected-protocol" class="protocol"></span><span id="selected-source"></span></div></div>
+        <div class="detail-tabs" role="group" aria-label="节点详情页面"><button id="connection-tab" type="button" aria-pressed="true">连接配置</button><button id="diagnostics-tab" type="button" aria-pressed="false">检测详情</button></div>
+        <div id="connection-settings">
+        <div class="field"><label for="selected-username">SOCKS5 用户名</label><div class="input-action"><input id="selected-username" readonly spellcheck="false"><button id="username-copy" class="text-button" type="button">复制</button></div></div>
+        <div class="field"><label for="socks-address">代理地址</label><input id="socks-address" type="text" inputmode="url" spellcheck="false" autocomplete="off" placeholder="127.0.0.1:1080"></div>
+        <div class="field"><label for="socks-password">代理密码</label><input id="socks-password" type="text" autocomplete="off" spellcheck="false"></div>
+        <div class="output-heading"><label id="connection-preview-label" for="connection-preview">连接链接</label><div class="format-tabs" role="group" aria-label="复制格式"><button id="link-tab" type="button" aria-pressed="true">链接</button><button id="curl-tab" type="button" aria-pressed="false">curl</button></div></div>
+        <textarea id="connection-preview" rows="4" readonly spellcheck="false"></textarea>
+        <p id="connection-error" class="form-error" role="status" hidden></p>
+        <p id="copy-hint" class="field-help" role="status" hidden></p>
+        <button id="connection-copy" class="button primary copy-primary" type="button">复制 SOCKS5 链接</button>
+        </div>
+        <section id="diagnostics-panel" aria-label="节点检测详情" hidden>
+          <div class="probe-actions"><button id="latency-test" class="button secondary" type="button">延迟探测</button><button id="ip-test" class="button primary" type="button">IP 检测</button></div>
+          <div class="diagnostic-section"><div class="diagnostic-heading"><h3>HTTP 延迟</h3><span id="latency-checked" class="muted"></span></div><div id="latency-result" class="latency-result">未检测</div></div>
+          <div class="diagnostic-section"><div class="diagnostic-heading"><h3>出口 IP</h3><span id="ip-checked" class="muted"></span></div><div id="ip-empty" class="diagnostic-empty">未检测</div><div id="ip-report" hidden>
+            <div class="ip-summary"><strong id="ip-address"></strong><span id="ip-location"></span></div>
+            <div id="risk-summary" class="risk-summary"></div>
+            <dl id="ip-fields" class="diagnostic-fields"></dl>
+            <h4 class="detail-section-title">识别标签</h4><dl id="ip-flags" class="diagnostic-fields"></dl>
+            <h4 class="detail-section-title">评分依据</h4><div id="ip-signals"></div>
+            <details class="advanced-settings"><summary>完整检测响应</summary><pre id="ip-raw" class="raw-response"></pre></details>
+          </div></div>
+        </section>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="subscription-dialog" class="drawer" aria-labelledby="subscription-dialog-title">
+    <form id="subscription-form">
+      <div class="dialog-heading"><h2 id="subscription-dialog-title">添加订阅</h2><button class="close-button close-dialog" type="button" aria-label="关闭订阅表单">×</button></div>
+      <div class="field"><label for="subscription-url">订阅链接</label><textarea id="subscription-url" rows="3" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://…" required></textarea></div>
+      <div class="field"><label for="subscription-name">订阅名称 <span class="muted">（可选）</span></label><input id="subscription-name" type="text" autocomplete="off" placeholder="自动命名"></div>
+      <details id="subscription-advanced" class="advanced-settings"><summary>更新设置</summary><div class="field"><label for="subscription-interval">自动更新间隔</label><input id="subscription-interval" type="text" placeholder="6h" autocomplete="off"></div></details>
+      <p id="subscription-error" class="form-error" role="alert" hidden></p>
+      <div class="dialog-actions"><button class="button secondary close-dialog" type="button">取消</button><button id="subscription-submit" class="button primary" type="submit">添加并拉取</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="delete-dialog" class="confirm-dialog" aria-labelledby="delete-title">
+    <form id="delete-form"><div class="dialog-heading"><h2 id="delete-title">删除订阅</h2><button class="close-button close-dialog" type="button" aria-label="关闭删除确认">×</button></div><p id="delete-description"></p><p id="delete-error" class="form-error" role="alert" hidden></p><div class="dialog-actions"><button class="button secondary close-dialog" type="button">取消</button><button id="delete-submit" class="button danger" type="submit">删除订阅</button></div></form>
+  </dialog>
+</body>
+</html>

@@ -31,3 +31,9 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# OneSocks local state and build output
+/data/
+/bin/
+/onesocks
+/config.yaml

@@ -1,0 +1,16 @@
+# Copy to config.yaml and run: onesocks -config config.yaml
+socks_listen: 127.0.0.1:10801
+api_listen: 0.0.0.0:10802
+# SQLite state is stored in data_dir/onesocks.db.
+data_dir: data
+
+# Empty accepts any nonempty SOCKS5 password; the username selects a node.
+socks_password: ""
+# When set, every API request needs Authorization: Bearer <token>.
+api_token: ""
+
+# Bind upstream connections, node DNS and subscription downloads to this interface.
+# Empty follows system routing; set e.g. eth0 to bypass a local TUN route.
+outbound_interface: eth0
+
+# Add subscriptions through POST /api/subscriptions.
