@@ -37,3 +37,6 @@ go.work.sum
 /bin/
 /onesocks
 /config.yaml
+
+# Local development notes
+/docs/
