@@ -6,6 +6,7 @@ OneSocks 将多个代理订阅聚合为一个 SOCKS5 服务，通过用户名选
 
 - 订阅管理：添加、编辑、删除、手动刷新和定时刷新多个订阅。
 - 节点选路：通过同一 SOCKS5 端口访问不同节点，使用节点 ID 或完整名称作为用户名。
+- 流量转发：支持 TCP 和 SOCKS5 UDP，可承载 QUIC / HTTP/3 流量。
 - 节点检测：检测 HTTP 延迟、出口 IP、国家/地区及 IP 风险评分，支持并发批量检测。
 - 节点管理：搜索、组合筛选、排序、分页，导出 CSV、SOCKS5 链接和 JSON。
 - 单文件部署：管理界面随程序编译，无需独立前端服务或数据库服务。
@@ -161,7 +162,13 @@ curl -N -X POST http://127.0.0.1:10802/api/nodes/probe \
 
 订阅支持 sing-box JSON、节点 URI 列表及 Base64 编码的 URI 列表。支持的协议包括 Shadowsocks、VLESS、Trojan、VMess、Hysteria2 和 AnyTLS，以及常用的 TLS、Reality、WebSocket 和 gRPC 配置。
 
-仅导入独立代理出站，不导入订阅的监听、路由或完整 DNS 配置，不支持 Clash YAML 和链式出站。本地 SOCKS5 支持 TCP CONNECT，不支持 UDP ASSOCIATE 和 BIND。
+仅导入独立代理出站，不导入订阅的监听、路由或完整 DNS 配置，不支持 Clash YAML 和链式出站。本地 SOCKS5 支持 TCP CONNECT 和 UDP ASSOCIATE，不支持 BIND。
+
+UDP 与 TCP 由同一个 OneSocks 进程处理。客户端先通过 TCP 认证并协商 UDP 会话，再向返回的 UDP 地址发送带有 SOCKS5 目标地址头的数据包。TCP 控制连接只维持会话，UDP 数据不经过这条 TCP 连接转发。当前每个会话分配一个临时 UDP 中继端口；远程、容器或 NAT 部署时，需要保证返回的地址和 UDP 端口可从客户端访问。
+
+客户端和所选节点均需支持 UDP，才能转发 QUIC / HTTP/3；仅支持 SOCKS5 TCP 的客户端不会自动获得此能力。发往订阅节点的外层封装由节点协议决定。现有 HTTP 延迟及 IP 检测仍使用 TCP，不能据此判断节点的 UDP 可用性。
+
+UDP 会话在 TCP 控制连接关闭或空闲 2 分钟后清理，每个目标的空闲连接也会独立回收。每个会话最多保留 128 个目标，每个目标最多排队 8 个数据包；超出限制的包及 SOCKS5 分片包会被丢弃。
 
 ## 构建与测试
 

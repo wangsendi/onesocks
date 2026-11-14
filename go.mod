@@ -4,6 +4,7 @@ go 1.25.5
 
 require (
 	github.com/gin-gonic/gin v1.12.0
+	github.com/quic-go/quic-go v0.59.0
 	github.com/sagernet/sing v0.9.7-0.20261023115459-5dc452e537bf
 	github.com/sagernet/sing-box v1.14.4
 	github.com/things-go/go-socks5 v0.1.4
@@ -74,7 +75,6 @@ require (
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
-	github.com/quic-go/quic-go v0.59.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/sagernet/bbolt v0.0.0-20260915102804-500ee1e84832 // indirect
 	github.com/sagernet/fswatch v0.1.2 // indirect

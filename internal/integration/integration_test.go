@@ -39,7 +39,7 @@ func startShadowsocks(t *testing.T) string {
 	port := listener.Addr().(*net.TCPAddr).Port
 	_ = listener.Close()
 	ctx := singbox.Context(context.Background())
-	raw := fmt.Sprintf(`{"log":{"disabled":true},"inbounds":[{"type":"shadowsocks","tag":"test-in","listen":"127.0.0.1","listen_port":%d,"method":"aes-128-gcm","password":"integration-secret","network":"tcp"}],"outbounds":[{"type":"direct","tag":"direct"}],"route":{"final":"direct","default_domain_resolver":"local"},"dns":{"servers":[{"type":"local","tag":"local"}]}}`, port)
+	raw := fmt.Sprintf(`{"log":{"disabled":true},"inbounds":[{"type":"shadowsocks","tag":"test-in","listen":"127.0.0.1","listen_port":%d,"method":"aes-128-gcm","password":"integration-secret"}],"outbounds":[{"type":"direct","tag":"direct"}],"route":{"final":"direct","default_domain_resolver":"local"},"dns":{"servers":[{"type":"local","tag":"local"}]}}`, port)
 	var opts option.Options
 	if err := boxjson.UnmarshalContext(ctx, []byte(raw), &opts); err != nil {
 		t.Fatal(err)

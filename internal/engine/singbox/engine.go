@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"slices"
 	"sync"
 	"time"
 
@@ -143,12 +144,15 @@ func NewWithOptions(ctx context.Context, nodes []engine.Node, opts Options) (eng
 }
 
 func (e *Engine) DialContext(ctx context.Context, nodeID, network, address string) (net.Conn, error) {
-	if network != "tcp" {
-		return nil, fmt.Errorf("only TCP is supported")
+	if network != "tcp" && network != "udp" {
+		return nil, fmt.Errorf("unsupported network: %s", network)
 	}
 	out, ok := e.box.Outbound().Outbound(nodeID)
 	if !ok {
 		return nil, fmt.Errorf("node not found")
+	}
+	if !slices.Contains(out.Network(), network) {
+		return nil, fmt.Errorf("node does not support %s", network)
 	}
 	if _, _, err := net.SplitHostPort(address); err != nil {
 		return nil, err
@@ -160,7 +164,7 @@ func (e *Engine) DialContext(ctx context.Context, nodeID, network, address strin
 	// Early protocol headers must be sent even for server-first protocols such
 	// as SSH. Empty Write triggers sing's deferred handshake without consuming
 	// application data. Its deadline is removed before returning the connection.
-	if N.NeedHandshakeForWrite(conn) {
+	if network == "tcp" && N.NeedHandshakeForWrite(conn) {
 		if deadline, ok := ctx.Deadline(); ok {
 			_ = conn.SetWriteDeadline(deadline)
 		}
@@ -177,7 +181,7 @@ func (e *Engine) DialContext(ctx context.Context, nodeID, network, address strin
 		_ = conn.Close()
 		return nil, err
 	}
-	if e.halfClose[nodeID] {
+	if network == "tcp" && e.halfClose[nodeID] {
 		mux, multiplexed := out.(adapter.OutboundWithMultiplex)
 		if !multiplexed || !mux.MultiplexEnabled() {
 			if writer, ok := common.Cast[interface{ CloseWrite() error }](conn); ok {

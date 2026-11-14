@@ -43,7 +43,7 @@ func TestRealProxyProtocols(t *testing.T) {
 			var share string
 			switch protocol {
 			case "shadowsocks":
-				inbound["method"], inbound["password"], inbound["network"] = "aes-128-gcm", "integration-secret", "tcp"
+				inbound["method"], inbound["password"] = "aes-128-gcm", "integration-secret"
 				share = fmt.Sprintf("ss://aes-128-gcm:integration-secret@127.0.0.1:%d#SS", port)
 			case "vless":
 				inbound["users"] = []any{map[string]any{"uuid": integrationUUID}}
@@ -81,6 +81,12 @@ func TestRealProxyProtocols(t *testing.T) {
 			// The proxy receives a domain destination and resolves it on the server.
 			_, targetPort, _ := net.SplitHostPort(target)
 			assertEcho(t, client, "node", net.JoinHostPort("localhost", targetPort))
+			t.Run("udp", func(t *testing.T) {
+				target := udpEchoTarget(t, "127.0.0.1:0")
+				assertUDPEcho(t, client, "node", target)
+				_, port, _ := net.SplitHostPort(target)
+				assertUDPEcho(t, client, "node", net.JoinHostPort("localhost", port))
+			})
 			t.Run("ipv6-target", func(t *testing.T) {
 				probe, err := net.Listen("tcp6", "[::1]:0")
 				if err != nil {
@@ -89,6 +95,7 @@ func TestRealProxyProtocols(t *testing.T) {
 				_ = probe.Close()
 				ipv6, _ := echoTarget(t, "tcp6", "[::1]:0", "")
 				assertEcho(t, client, "node", ipv6)
+				assertUDPEcho(t, client, "node", udpEchoTarget(t, "[::1]:0"))
 			})
 		})
 	}

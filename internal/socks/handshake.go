@@ -7,7 +7,6 @@ import (
 	"errors"
 	"io"
 	"net"
-	"syscall"
 
 	"onesocks/internal/domain"
 
@@ -45,21 +44,27 @@ func (a *nodeAuthenticator) Authenticate(reader io.Reader, writer io.Writer, use
 	delete(auth.Payload, "password")
 	// ServeConn supplies its buffered reader. Peek preserves the library's
 	// parsing and pipelined data, while keeping our early rejection policy.
-	buffered := reader.(*bufio.Reader)
+	if err := validateRequest(reader.(*bufio.Reader), writer); err != nil {
+		return nil, err
+	}
+	return auth, nil
+}
+
+func validateRequest(buffered *bufio.Reader, writer io.Writer) error {
 	header, err := buffered.Peek(4)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	code := statute.RepSuccess
 	switch {
 	case header[0] != statute.VersionSocks5 || header[2] != 0:
 		code = statute.RepServerFailure
-	case header[1] != statute.CommandConnect:
+	case header[1] != statute.CommandConnect && header[1] != statute.CommandAssociate:
 		code = statute.RepCommandNotSupported
 	case header[3] == statute.ATYPDomain:
 		header, err = buffered.Peek(5)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if header[4] == 0 {
 			code = statute.RepAddrTypeNotSupported
@@ -67,9 +72,9 @@ func (a *nodeAuthenticator) Authenticate(reader io.Reader, writer io.Writer, use
 	}
 	if code != statute.RepSuccess {
 		_ = reply(writer, code, nil)
-		return nil, errors.New("SOCKS5 request rejected")
+		return errors.New("SOCKS5 request rejected")
 	}
-	return auth, nil
+	return nil
 }
 
 // Domain destinations must reach the selected proxy without local DNS lookup.
@@ -87,34 +92,4 @@ func reply(writer io.Writer, code byte, bound net.Addr) error {
 		bound = &net.TCPAddr{IP: net.IPv4zero, Port: addr.Port}
 	}
 	return socks5.SendReply(writer, code, bound)
-}
-
-func dialErrorCode(err error) byte {
-	var netErr net.Error
-	switch {
-	case errors.Is(err, syscall.ENETUNREACH):
-		return statute.RepNetworkUnreachable
-	case errors.Is(err, syscall.EHOSTUNREACH):
-		return statute.RepHostUnreachable
-	case errors.Is(err, syscall.ECONNREFUSED):
-		return statute.RepConnectionRefused
-	case errors.Is(err, context.DeadlineExceeded), errors.As(err, &netErr) && netErr.Timeout():
-		return statute.RepTTLExpired
-	default:
-		return statute.RepServerFailure
-	}
-}
-
-type bufferedConn struct {
-	net.Conn
-	reader io.Reader
-}
-
-func (c *bufferedConn) Read(p []byte) (int, error) { return c.reader.Read(p) }
-
-func (c *bufferedConn) CloseWrite() error {
-	if writer, ok := c.Conn.(interface{ CloseWrite() error }); ok {
-		return writer.CloseWrite()
-	}
-	return c.Close()
 }
