@@ -161,9 +161,8 @@ func (e *Engine) DialContext(ctx context.Context, nodeID, network, address strin
 	if err != nil {
 		return nil, err
 	}
-	// Early protocol headers must be sent even for server-first protocols such
-	// as SSH. Empty Write triggers sing's deferred handshake without consuming
-	// application data. Its deadline is removed before returning the connection.
+	// Flush deferred TCP handshakes for server-first protocols such as SSH.
+	// UDP writes are payload and must never be used as handshake probes.
 	if network == "tcp" && N.NeedHandshakeForWrite(conn) {
 		if deadline, ok := ctx.Deadline(); ok {
 			_ = conn.SetWriteDeadline(deadline)

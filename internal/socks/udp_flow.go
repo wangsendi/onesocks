@@ -52,8 +52,7 @@ func (a *udpAssociation) forward(ctx context.Context, client *net.UDPAddr, desti
 }
 
 func (a *udpAssociation) forwardReplies(ctx context.Context, upstream net.Conn, client *net.UDPAddr, header []byte, active func()) error {
-	// Reserve room for the header without reducing the upstream read buffer:
-	// an oversized response must be dropped by UDP, never silently truncated.
+	// Keep room for a full datagram plus its header to avoid truncating replies.
 	buffer := make([]byte, len(header)+maxUDPPacket)
 	copy(buffer, header)
 	for {

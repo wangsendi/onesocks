@@ -52,7 +52,7 @@ func (l *testLease) Close() error {
 	return nil
 }
 
-func startServer(t *testing.T, backend *testBackend, cfg Config) (string, context.CancelFunc, <-chan error) {
+func startServer(t *testing.T, backend *testBackend, cfg Config) (string, context.CancelFunc) {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -75,7 +75,7 @@ func startServer(t *testing.T, backend *testBackend, cfg Config) (string, contex
 			t.Errorf("leaked %d node leases", active)
 		}
 	})
-	return listener.Addr().String(), cancel, done
+	return listener.Addr().String(), cancel
 }
 
 func connect(t *testing.T, address string) net.Conn {

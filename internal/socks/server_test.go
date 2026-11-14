@@ -16,7 +16,7 @@ func TestCancellationInterruptsDialAndReleasesLease(t *testing.T) {
 		<-ctx.Done()
 		return nil, ctx.Err()
 	}}
-	address, cancel, _ := startServer(t, backend, Config{})
+	address, cancel := startServer(t, backend, Config{})
 	conn := connect(t, address)
 	authenticate(t, conn, "n_test", "p", false, 0)
 	if err := writeAll(conn, []byte{5, 1, 0, 1, 127, 0, 0, 1, 0, 80}); err != nil {
@@ -43,7 +43,7 @@ func TestCancellationClosesEstablishedSession(t *testing.T) {
 	backend := &testBackend{username: "n_test", dial: func(context.Context, string, string) (net.Conn, error) {
 		return proxySide, nil
 	}}
-	address, cancel, _ := startServer(t, backend, Config{})
+	address, cancel := startServer(t, backend, Config{})
 	conn := connect(t, address)
 	authenticate(t, conn, "n_test", "p", false, 0)
 	if err := writeAll(conn, []byte{5, 1, 0, 1, 127, 0, 0, 1, 0, 80}); err != nil {

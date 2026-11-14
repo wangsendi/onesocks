@@ -28,10 +28,7 @@ func (s *Server) connect(ctx context.Context, client net.Conn, lease domain.Leas
 		return reply(client, dialErrorCode(err), nil)
 	}
 	defer upstream.Close()
-	stop := context.AfterFunc(ctx, func() {
-		_ = client.Close()
-		_ = upstream.Close()
-	})
+	stop := context.AfterFunc(ctx, func() { _ = upstream.Close() })
 	defer stop()
 	_ = client.SetWriteDeadline(time.Now().Add(s.cfg.HandshakeTimeout))
 	if err := reply(client, statute.RepSuccess, upstream.LocalAddr()); err != nil {

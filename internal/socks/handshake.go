@@ -14,8 +14,7 @@ import (
 	"github.com/things-go/go-socks5/statute"
 )
 
-// nodeAuthenticator is local to one ServeConn call. Pin the selected runtime
-// before acknowledging authentication; the caller releases it on every exit.
+// Each authenticator pins one session's node before acknowledging authentication.
 type nodeAuthenticator struct {
 	backend  Backend
 	password string
@@ -42,8 +41,7 @@ func (a *nodeAuthenticator) Authenticate(reader io.Reader, writer io.Writer, use
 		return nil, err
 	}
 	delete(auth.Payload, "password")
-	// ServeConn supplies its buffered reader. Peek preserves the library's
-	// parsing and pipelined data, while keeping our early rejection policy.
+	// Peek validates without consuming the library's buffered request or payload.
 	if err := validateRequest(reader.(*bufio.Reader), writer); err != nil {
 		return nil, err
 	}

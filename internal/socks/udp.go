@@ -65,10 +65,7 @@ func (a *udpAssociation) run(ctx context.Context, reader io.Reader) error {
 	group, ctx := errgroup.WithContext(ctx)
 	stop := context.AfterFunc(ctx, a.close)
 	defer stop()
-	defer func() {
-		a.close()
-		a.workers.Wait()
-	}()
+	defer a.workers.Wait()
 	group.Go(func() error {
 		// TCP only controls the association's lifetime; payload travels over UDP.
 		_, err := io.Copy(io.Discard, reader)
@@ -112,8 +109,7 @@ func (a *udpAssociation) receive(ctx context.Context) error {
 		a.clientPort = source.Port
 		a.touch()
 		queue := a.flowQueue(ctx, source, packet.DstAddr.String())
-		// This loop is the only producer. Drop before copying when full; a
-		// consumer can only free space, so the following send cannot block.
+		// One producer: available capacity cannot shrink before this send.
 		if queue != nil && len(queue) < cap(queue) {
 			queue <- bytes.Clone(packet.Data)
 		}

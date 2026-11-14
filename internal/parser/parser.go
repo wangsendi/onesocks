@@ -106,7 +106,6 @@ func makeNode(name string, obj map[string]any) (domain.NodeSpec, error) {
 	if text(obj["detour"]) != "" {
 		return zero, errors.New("chained outbounds cannot be imported independently")
 	}
-	// Preserve the existing normalized representation used for node IDs.
 	for _, field := range []string{"server_port", "min_idle_session"} {
 		if value, present := obj[field]; present && value != nil {
 			count, err := number(value)

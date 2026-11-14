@@ -64,32 +64,31 @@ func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 			return nil
 		}
 		workers.Go(func() {
-			defer conn.Close()
-			stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
-			defer stop()
 			s.handle(ctx, conn)
 		})
 	}
 }
 
 func (s *Server) handle(ctx context.Context, client net.Conn) {
+	defer client.Close()
 	if ctx.Err() != nil {
 		return
 	}
+	stop := context.AfterFunc(ctx, func() { _ = client.Close() })
+	defer stop()
 	_ = client.SetDeadline(time.Now().Add(s.cfg.HandshakeTimeout))
 	auth := &nodeAuthenticator{backend: s.backend, password: s.cfg.Password}
+	// Authentication can acquire a lease before command parsing fails.
 	defer func() {
 		if auth.lease != nil {
 			_ = auth.lease.Close()
 		}
 	}()
-	// Authentication pins a lease before command parsing; release it even if
-	// the handshake fails before either command handler runs.
+	// ServeConn uses context.Background; both handlers retain the service context.
 	handler := socks5.NewServer(
 		socks5.WithAuthMethods([]socks5.Authenticator{auth}),
 		socks5.WithResolver(remoteResolver{}),
 		socks5.WithConnectHandle(func(_ context.Context, _ io.Writer, request *socks5.Request) error {
-			// ServeConn starts with context.Background; retain our service context.
 			return s.connect(ctx, client, auth.lease, request)
 		}),
 		socks5.WithAssociateHandle(func(_ context.Context, _ io.Writer, request *socks5.Request) error {

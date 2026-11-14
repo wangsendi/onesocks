@@ -33,7 +33,7 @@ func TestPipelinedPayloadAndHalfClose(t *testing.T) {
 		targetDone <- err
 	}()
 	backend := &testBackend{username: "n_test"}
-	address, _, _ := startServer(t, backend, Config{})
+	address, _ := startServer(t, backend, Config{})
 	conn := connect(t, address)
 	authenticate(t, conn, "n_test", "p", false, 0)
 	port := target.Addr().(*net.TCPAddr).Port
@@ -78,7 +78,7 @@ func TestRequestAddressForms(t *testing.T) {
 				dialed <- address
 				return nil, syscall.ECONNREFUSED
 			}}
-			address, _, _ := startServer(t, backend, Config{})
+			address, _ := startServer(t, backend, Config{})
 			conn := connect(t, address)
 			authenticate(t, conn, "n_test", "p", false, 0)
 			packet := append([]byte{5, 1, 0}, tc.addr...)
@@ -115,7 +115,7 @@ func TestDialFailureReturnsSOCKSError(t *testing.T) {
 			backend := &testBackend{username: "n_test", dial: func(context.Context, string, string) (net.Conn, error) {
 				return nil, tc.err
 			}}
-			address, _, _ := startServer(t, backend, Config{})
+			address, _ := startServer(t, backend, Config{})
 			conn := connect(t, address)
 			authenticate(t, conn, "n_test", "p", false, 0)
 			if err := writeAll(conn, []byte{5, 1, 0, 1, 127, 0, 0, 1, 0, 80}); err != nil {
@@ -131,7 +131,7 @@ func TestDialTimeoutReturnsTTLExpired(t *testing.T) {
 		<-ctx.Done()
 		return nil, ctx.Err()
 	}}
-	address, _, _ := startServer(t, backend, Config{DialTimeout: 20 * time.Millisecond})
+	address, _ := startServer(t, backend, Config{DialTimeout: 20 * time.Millisecond})
 	conn := connect(t, address)
 	authenticate(t, conn, "n_test", "p", false, 0)
 	if err := writeAll(conn, []byte{5, 1, 0, 1, 127, 0, 0, 1, 0, 80}); err != nil {

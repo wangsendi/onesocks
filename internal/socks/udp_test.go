@@ -97,7 +97,7 @@ func udpEcho(t *testing.T) string {
 
 func TestUDPAssociatePacketBoundariesAndControlLifetime(t *testing.T) {
 	backend := &testBackend{username: "n_test", released: make(chan struct{}, 1)}
-	address, _, _ := startServer(t, backend, Config{})
+	address, _ := startServer(t, backend, Config{})
 	control, relay := associateClient(t, address, "0.0.0.0:0")
 	client := udpClient(t, "127.0.0.1")
 	for _, destination := range []string{udpEcho(t), udpEcho(t)} {
@@ -119,7 +119,7 @@ func TestUDPAssociatePacketBoundariesAndControlLifetime(t *testing.T) {
 
 func TestUDPRejectsMalformedPacketsAndOtherSources(t *testing.T) {
 	backend := &testBackend{username: "n_test"}
-	address, _, _ := startServer(t, backend, Config{})
+	address, _ := startServer(t, backend, Config{})
 	_, relay := associateClient(t, address, "0.0.0.0:0")
 	client := udpClient(t, "127.0.0.1")
 	destination := udpEcho(t)
@@ -146,7 +146,7 @@ func TestUDPRejectsMalformedPacketsAndOtherSources(t *testing.T) {
 
 func TestUDPDeclaredPortAndPeer(t *testing.T) {
 	backend := &testBackend{username: "n_test"}
-	address, _, _ := startServer(t, backend, Config{})
+	address, _ := startServer(t, backend, Config{})
 	client := udpClient(t, "127.0.0.1")
 	_, relay := associateClient(t, address, client.LocalAddr().String())
 	destination := udpEcho(t)
@@ -172,7 +172,7 @@ func TestUDPDeclaredPortAndPeer(t *testing.T) {
 
 func TestUDPIdleAssociationReleasesLease(t *testing.T) {
 	backend := &testBackend{username: "n_test", released: make(chan struct{}, 1)}
-	address, _, _ := startServer(t, backend, Config{UDPIdleTimeout: 50 * time.Millisecond})
+	address, _ := startServer(t, backend, Config{UDPIdleTimeout: 50 * time.Millisecond})
 	control, _ := associateClient(t, address, "0.0.0.0:0")
 	var b [1]byte
 	if _, err := control.Read(b[:]); err != io.EOF {
@@ -207,7 +207,7 @@ func TestUDPIdleDestinationClosesWhileAnotherStaysActive(t *testing.T) {
 		}
 		return conn, err
 	}}
-	address, _, _ := startServer(t, backend, Config{UDPIdleTimeout: 300 * time.Millisecond})
+	address, _ := startServer(t, backend, Config{UDPIdleTimeout: 300 * time.Millisecond})
 	_, relay := associateClient(t, address, "0.0.0.0:0")
 	client := udpClient(t, "127.0.0.1")
 	echo := func(destination string) {
@@ -244,7 +244,7 @@ func TestUDPSlowDialDoesNotBlockOtherDestinationsAndCancels(t *testing.T) {
 		}
 		return (&net.Dialer{}).DialContext(ctx, network, address)
 	}}
-	address, _, _ := startServer(t, backend, Config{})
+	address, _ := startServer(t, backend, Config{})
 	control, relay := associateClient(t, address, "0.0.0.0:0")
 	client := udpClient(t, "127.0.0.1")
 	sendUDP(t, client, relay, udpPacket(t, "slow.invalid:443", []byte("queued")))
@@ -274,7 +274,7 @@ func TestUDPFlowLimitAndShutdown(t *testing.T) {
 		<-ctx.Done()
 		return nil, ctx.Err()
 	}}
-	address, cancel, _ := startServer(t, backend, Config{})
+	address, cancel := startServer(t, backend, Config{})
 	_, relay := associateClient(t, address, "0.0.0.0:0")
 	client := udpClient(t, "127.0.0.1")
 	for i := range maxUDPFlows {

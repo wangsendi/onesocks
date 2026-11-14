@@ -27,7 +27,7 @@ func TestAuthenticationAndLeaseRelease(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			backend := &testBackend{username: tc.known}
-			address, _, _ := startServer(t, backend, Config{Password: tc.configured})
+			address, _ := startServer(t, backend, Config{Password: tc.configured})
 			conn := connect(t, address)
 			authenticate(t, conn, tc.username, tc.password, true, tc.status)
 			_ = conn.Close()
@@ -37,7 +37,7 @@ func TestAuthenticationAndLeaseRelease(t *testing.T) {
 
 func TestRequiresUsernamePassword(t *testing.T) {
 	backend := &testBackend{username: "n_test"}
-	address, _, _ := startServer(t, backend, Config{})
+	address, _ := startServer(t, backend, Config{})
 	conn := connect(t, address)
 	if err := writeAll(conn, []byte{5, 1, 0}); err != nil {
 		t.Fatal(err)
@@ -49,7 +49,7 @@ func TestUnsupportedCommandsNeverDial(t *testing.T) {
 	for _, command := range []byte{2, 255} {
 		t.Run(strconv.Itoa(int(command)), func(t *testing.T) {
 			backend := &testBackend{username: "n_test"}
-			address, _, _ := startServer(t, backend, Config{})
+			address, _ := startServer(t, backend, Config{})
 			conn := connect(t, address)
 			authenticate(t, conn, "n_test", "p", false, 0)
 			if err := writeAll(conn, []byte{5, command, 0, 1}); err != nil {
@@ -77,7 +77,7 @@ func TestInvalidRequestsNeverDial(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			backend := &testBackend{username: "n_test", released: make(chan struct{}, 1)}
-			address, _, _ := startServer(t, backend, Config{})
+			address, _ := startServer(t, backend, Config{})
 			conn := connect(t, address)
 			authenticate(t, conn, "n_test", "p", false, 0)
 			if err := writeAll(conn, tc.packet); err != nil {
@@ -98,7 +98,7 @@ func TestInvalidRequestsNeverDial(t *testing.T) {
 
 func TestIncompleteRequestReleasesAuthenticatedLease(t *testing.T) {
 	backend := &testBackend{username: "n_test", released: make(chan struct{}, 1)}
-	address, _, _ := startServer(t, backend, Config{})
+	address, _ := startServer(t, backend, Config{})
 	conn := connect(t, address)
 	authenticate(t, conn, "n_test", "p", false, 0)
 	if got := backend.active.Load(); got != 1 {
@@ -122,7 +122,7 @@ func TestHandshakeTimeoutClosesIncompleteSessions(t *testing.T) {
 	for _, stage := range []string{"greeting", "credentials", "request"} {
 		t.Run(stage, func(t *testing.T) {
 			backend := &testBackend{username: "n_test", released: make(chan struct{}, 1)}
-			address, _, _ := startServer(t, backend, Config{HandshakeTimeout: 200 * time.Millisecond})
+			address, _ := startServer(t, backend, Config{HandshakeTimeout: 200 * time.Millisecond})
 			conn := connect(t, address)
 			switch stage {
 			case "greeting":
