@@ -241,7 +241,6 @@ func TestAnyTLSURIConversion(t *testing.T) {
 func TestConfigDocumentsAreNotParsedAsURILists(t *testing.T) {
 	for _, input := range []string{
 		"proxies: []",
-		"proxies:\n  - name: fixture\n    type: ss\n    server: example.test\n    port: 443\n    cipher: chacha20-ietf-poly1305\n    password: fixture-password\n",
 		"proxies:\n  uri: |\n    trojan://fixture-password@example.test:443#fixture\n",
 		"proxies:\n  - trojan://fixture-password@example.test:443#fixture\n",
 	} {

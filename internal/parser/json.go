@@ -21,6 +21,9 @@ func parseJSON(data []byte) (domain.ParseResult, error) {
 		if json.Unmarshal(data, &doc) != nil {
 			return result, errors.New("invalid subscription JSON")
 		}
+		if _, ok := doc["proxies"]; ok {
+			return parseClash(data)
+		}
 		if raw, ok := doc["outbounds"]; ok {
 			if json.Unmarshal(raw, &entries) != nil {
 				return result, errors.New("invalid outbounds list")

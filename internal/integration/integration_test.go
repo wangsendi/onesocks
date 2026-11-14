@@ -58,10 +58,23 @@ func startShadowsocks(t *testing.T) string {
 }
 
 func TestAPIToSOCKSToSingBoxAndRefresh(t *testing.T) {
+	for _, format := range []string{"URI", "Clash"} {
+		t.Run(format, func(t *testing.T) { testAPIToSOCKSToSingBoxAndRefresh(t, format) })
+	}
+}
+
+func testAPIToSOCKSToSingBoxAndRefresh(t *testing.T, format string) {
 	remote := startShadowsocks(t)
 	credential := base64.RawStdEncoding.EncodeToString([]byte("aes-128-gcm:integration-secret"))
 	var body atomic.Value
-	body.Store("ss://" + credential + "@" + remote + "#香港01")
+	fixture := func(name string) string {
+		if format == "Clash" {
+			host, port, _ := net.SplitHostPort(remote)
+			return fmt.Sprintf("proxies:\n- {name: %q, type: ss, server: %q, port: %s, cipher: aes-128-gcm, password: integration-secret, udp: true}\n", name, host, port)
+		}
+		return "ss://" + credential + "@" + remote + "#" + name
+	}
+	body.Store(fixture("香港01"))
 	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, body.Load().(string)) }))
 	defer source.Close()
 	opts := service.Options{DataDir: t.TempDir(), FetchTimeout: 3 * time.Second, RefreshInterval: time.Hour, DrainTimeout: time.Second, Factory: singbox.New, Version: "test"}
@@ -202,10 +215,18 @@ func TestAPIToSOCKSToSingBoxAndRefresh(t *testing.T) {
 		}
 	}
 	checkEcho("before")
+	if format == "Clash" {
+		body.Store("proxies: [{name: unsupported, type: ssr}]\n")
+		request("POST", "/api/subscriptions/"+first.Subscription.ID+"/refresh", nil, 422)
+		if got := manager.Nodes(first.Subscription.ID); len(got.Items) != 1 || got.Items[0].ID != node.ID {
+			t.Fatal("failed Clash refresh discarded the last successful nodes")
+		}
+		checkEcho("after-failed-clash-refresh")
+	}
 	// Authentication must pin the old runtime even when CONNECT arrives only
 	// after a refresh removes that username from the current node pool.
 	pending := authenticateOnly(t, listener.Addr().String(), node.Username)
-	body.Store("ss://" + credential + "@" + remote + "#香港改名")
+	body.Store(fixture("香港改名"))
 	request("POST", "/api/subscriptions/"+first.Subscription.ID+"/refresh", nil, 200)
 	packet := []byte{5, 1, 0, 1, 127, 0, 0, 1, 0, 0}
 	binary.BigEndian.PutUint16(packet[8:], uint16(target.Listener.Addr().(*net.TCPAddr).Port))

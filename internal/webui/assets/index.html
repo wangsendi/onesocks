@@ -139,7 +139,7 @@
   <dialog id="subscription-dialog" class="drawer" aria-labelledby="subscription-dialog-title">
     <form id="subscription-form">
       <div class="dialog-heading"><h2 id="subscription-dialog-title">添加订阅</h2><button class="close-button close-dialog" type="button" aria-label="关闭订阅表单">×</button></div>
-      <div class="field"><label for="subscription-url">订阅链接</label><textarea id="subscription-url" rows="3" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://…" required></textarea></div>
+      <div class="field"><label for="subscription-url">订阅链接</label><textarea id="subscription-url" rows="3" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://…" aria-describedby="subscription-formats" required></textarea><p id="subscription-formats" class="field-help">支持 Clash / Mihomo、sing-box 和节点链接订阅，自动识别格式。</p></div>
       <div class="field"><label for="subscription-name">订阅名称 <span class="muted">（可选）</span></label><input id="subscription-name" type="text" autocomplete="off" placeholder="自动命名"></div>
       <details id="subscription-advanced" class="advanced-settings"><summary>更新设置</summary><div class="field"><label for="subscription-interval">自动更新间隔</label><input id="subscription-interval" type="text" placeholder="6h" autocomplete="off"></div></details>
       <p id="subscription-error" class="form-error" role="alert" hidden></p>

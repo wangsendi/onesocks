@@ -21,7 +21,9 @@ OneSocks is a single Go binary with an embedded Web UI, a sing-box protocol engi
 - Search, filter, sort, paginate, and export nodes as CSV, SOCKS5 links, or JSON.
 - Keep subscriptions, nodes, and probe results across restarts in SQLite.
 
-Supported imports: **sing-box JSON**, **URI lists**, and **Base64-encoded URI lists**. Supported node protocols include **Shadowsocks, VLESS, VMess, Trojan, Hysteria2, and AnyTLS**, with TLS, Reality, WebSocket, and gRPC where applicable. Clash YAML, chained outbounds, and imported listener/routing/DNS configurations are not supported.
+Supported imports: **Clash / Mihomo YAML**, **sing-box JSON**, **URI lists**, and **Base64-encoded subscriptions**. Supported node protocols include **Shadowsocks, VLESS, VMess, Trojan, Hysteria2, and AnyTLS**, with TLS, Reality, WebSocket, and gRPC where applicable. Clash subscriptions import the `proxies` list, including proxy-provider files; JSON-encoded Clash documents also work. Paste the HTTP(S) subscription URL into the Web UI or the existing subscription API—no format selection is needed.
+
+Clash imports cover the protocols above, TCP / WebSocket / gRPC transports, TLS / Reality, WebSocket early data and HTTP upgrade, and the `obfs` / `v2ray-plugin` Shadowsocks plugins. Unsupported protocols or options are skipped with warnings; if no valid nodes remain, the import fails and a refresh preserves the previous nodes. Proxy groups, rules, DNS settings, chained outbounds, and nested `proxy-providers` are not imported. For a configuration containing only provider references, add the provider’s subscription URL directly.
 
 ## Quick start
 
@@ -40,7 +42,7 @@ Open **<http://127.0.0.1:8080>**, add a subscription, then click **连接** (Con
 
 ### Docker (Linux)
 
-Images: `ghcr.io/wangsendi/onesocks:latest` or a pinned tag such as `:v0.1.0`, for **linux/amd64** and **linux/arm64**.
+Images: `ghcr.io/wangsendi/onesocks:latest` or a pinned tag such as `:v0.2.0`, for **linux/amd64** and **linux/arm64**.
 
 ```bash
 mkdir onesocks && cd onesocks
@@ -67,7 +69,7 @@ docker run -d --name onesocks --restart unless-stopped \
   ghcr.io/wangsendi/onesocks:latest
 ```
 
-Upgrade with `docker compose pull && docker compose up -d`. Set `ONESOCKS_VERSION=v0.1.0` in a `.env` file next to `compose.yaml` to pin a version. The container runs as UID/GID `65532`; if you replace the named volume with a bind mount, make that directory writable by this user.
+Upgrade with `docker compose pull && docker compose up -d`. Set `ONESOCKS_VERSION=v0.2.0` in a `.env` file next to `compose.yaml` to pin a version. The container runs as UID/GID `65532`; if you replace the named volume with a bind mount, make that directory writable by this user.
 
 ### Build from source
 
@@ -197,8 +199,8 @@ UDP associations and destination connections expire after 2 minutes of inactivit
 make test
 make race
 go vet -tags with_utls ./...
-make build VERSION=v0.1.0
-bash scripts/package.sh v0.1.0 linux amd64
+make build VERSION=v0.2.0
+bash scripts/package.sh v0.2.0 linux amd64
 ```
 
 Builds use `with_utls` for uTLS and Reality. UI assets are embedded using `go:embed`; rebuild and restart after changing them.

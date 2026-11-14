@@ -21,7 +21,9 @@ OneSocks 使用 Go 编写，内嵌 Web 管理界面和 sing-box 协议引擎，�
 - 搜索、组合筛选、排序、分页，导出 CSV、SOCKS5 链接或 JSON。
 - 使用 SQLite 保存订阅、节点及检测结果，重启后恢复。
 
-订阅支持 **sing-box JSON、URI 列表和 Base64 编码的 URI 列表**。支持的节点协议包括 **Shadowsocks、VLESS、VMess、Trojan、Hysteria2 和 AnyTLS**，以及相应协议的 TLS、Reality、WebSocket 和 gRPC 配置。不支持 Clash YAML、链式出站，也不导入订阅中的监听、路由和完整 DNS 配置。
+订阅支持 **Clash / Mihomo YAML、sing-box JSON、URI 列表和 Base64 编码的订阅**。支持的节点协议包括 **Shadowsocks、VLESS、VMess、Trojan、Hysteria2 和 AnyTLS**，以及相应协议的 TLS、Reality、WebSocket 和 gRPC 配置。Clash 订阅导入 `proxies` 节点列表，兼容 proxy-provider 节点文件及 JSON 格式的 Clash 配置。直接将 HTTP(S) 订阅链接填入管理界面或现有订阅 API 即可，无需手动选择格式。
+
+Clash 导入覆盖上述协议，支持 TCP / WebSocket / gRPC、TLS / Reality、WebSocket early data 和 HTTP upgrade，以及 Shadowsocks 的 `obfs` / `v2ray-plugin` 插件。不支持的协议或选项会跳过并返回提示；没有有效节点时导入失败，刷新失败会保留之前的节点。不导入策略组、规则、DNS 设置、链式出站，也不递归拉取 `proxy-providers`。若配置只有 provider 引用，请直接添加 provider 的订阅 URL。
 
 ## 快速开始
 
@@ -40,7 +42,7 @@ OneSocks 使用 Go 编写，内嵌 Web 管理界面和 sing-box 协议引擎，�
 
 ### Docker（Linux）
 
-镜像为 `ghcr.io/wangsendi/onesocks:latest`，也可固定版本，例如 `:v0.1.0`。支持 **linux/amd64** 和 **linux/arm64**。
+镜像为 `ghcr.io/wangsendi/onesocks:latest`，也可固定版本，例如 `:v0.2.0`。支持 **linux/amd64** 和 **linux/arm64**。
 
 ```bash
 mkdir onesocks && cd onesocks
@@ -67,7 +69,7 @@ docker run -d --name onesocks --restart unless-stopped \
   ghcr.io/wangsendi/onesocks:latest
 ```
 
-使用 `docker compose pull && docker compose up -d` 升级。在 `compose.yaml` 同目录的 `.env` 文件中设置 `ONESOCKS_VERSION=v0.1.0` 可固定版本。容器以 UID/GID `65532` 运行；改用宿主机目录挂载数据时，需保证该用户对目录有写权限。
+使用 `docker compose pull && docker compose up -d` 升级。在 `compose.yaml` 同目录的 `.env` 文件中设置 `ONESOCKS_VERSION=v0.2.0` 可固定版本。容器以 UID/GID `65532` 运行；改用宿主机目录挂载数据时，需保证该用户对目录有写权限。
 
 ### 从源码构建
 
@@ -197,8 +199,8 @@ UDP 会话及目标连接空闲 2 分钟后回收。每个会话最多保留 128
 make test
 make race
 go vet -tags with_utls ./...
-make build VERSION=v0.1.0
-bash scripts/package.sh v0.1.0 linux amd64
+make build VERSION=v0.2.0
+bash scripts/package.sh v0.2.0 linux amd64
 ```
 
 构建使用 `with_utls` 支持 uTLS 和 Reality。界面静态资源通过 `go:embed` 内嵌，修改后需要重新构建并重启。

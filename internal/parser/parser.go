@@ -18,7 +18,7 @@ import (
 
 var supported = map[string]bool{"shadowsocks": true, "vless": true, "trojan": true, "vmess": true, "hysteria2": true, "anytls": true}
 
-// Parse accepts a URI list, a base64-encoded URI list or sing-box JSON.
+// Parse accepts URI lists, sing-box JSON and Clash YAML, optionally base64 encoded.
 // Diagnostics deliberately never include URI credentials or source documents.
 func Parse(data []byte) (domain.ParseResult, error) {
 	var result domain.ParseResult
@@ -26,15 +26,11 @@ func Parse(data []byte) (domain.ParseResult, error) {
 	if len(data) == 0 {
 		return result, errors.New("subscription is empty")
 	}
-	if data[0] == '{' || data[0] == '[' {
-		return parseJSON(data)
-	}
-	if !strings.Contains(string(data), "://") {
-		decoded, err := decode64(string(data))
-		if err != nil || !bytes.Contains(decoded, []byte("://")) {
-			return result, errors.New("unrecognized subscription format")
-		}
+	if decoded, err := decode64(string(data)); err == nil && len(bytes.TrimSpace(decoded)) > 0 {
 		data = bytes.TrimSpace(bytes.TrimPrefix(decoded, []byte{0xef, 0xbb, 0xbf}))
+	}
+	if json.Valid(data) && (data[0] == '{' || data[0] == '[') {
+		return parseJSON(data)
 	}
 	lines := strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
 	first := true
@@ -43,10 +39,8 @@ func Parse(data []byte) (domain.ParseResult, error) {
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		// A URI-list document starts with a URI, rather than arbitrary config
-		// text that happens to contain URLs or a nested multiline URI value.
 		if first && !hasURIScheme(line) {
-			return result, errors.New("unrecognized subscription format")
+			return parseClash(data)
 		}
 		first = false
 		n, err := parseURI(line)
