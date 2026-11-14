@@ -2,12 +2,13 @@
 
 const $ = (id) => document.getElementById(id);
 const tokenKey = "onesocks.apiToken";
-const state = { config: null, nodes: [], subscriptions: [], status: null, generation: 0, selectedID: "", format: "link", loading: false, busy: false, page: "nodes", nodePage: 1 };
+const state = { config: null, nodes: [], subscriptions: [], status: null, generation: 0, detailID: "", format: "link", loading: false, busy: false, page: "nodes", nodePage: 1 };
 const extraFilterIDs = ["protocol-filter", "country-filter", "latency-status-filter", "ip-status-filter", "latency-max-filter", "score-max-filter"];
 const filterIDs = ["node-search", "subscription-filter", ...extraFilterIDs, "node-sort"];
 const probes = new Map();
 let batch = null;
 let detailPage = "connection";
+let detailTrigger = null;
 let token = "";
 let session = 0;
 let pollTimer;
@@ -20,7 +21,7 @@ function savedToken(value) {
     if (value === undefined) return sessionStorage.getItem(tokenKey) || "";
     if (value) sessionStorage.setItem(tokenKey, value);
     else sessionStorage.removeItem(tokenKey);
-  } catch (_) { /* The current session also works without browser storage. */ }
+  } catch { /* The current session also works without browser storage. */ }
   return "";
 }
 
@@ -50,7 +51,7 @@ function showLogin(message = "") {
   state.nodes = [];
   state.subscriptions = [];
   state.config = null;
-  state.selectedID = "";
+  state.detailID = "";
   state.loading = false;
   state.busy = false;
   for (const id of filterIDs) $(id).value = "";
@@ -100,7 +101,7 @@ async function api(path, options = {}, onResult) {
     return;
   }
   let result;
-  try { result = await response.json(); } catch (_) { /* The HTTP status is still available. */ }
+  try { result = await response.json(); } catch {}
   if (!response.ok) throw new Error(result?.error?.message || `请求失败（HTTP ${response.status}）`);
   if (result === undefined) throw new Error("服务返回了无效的 JSON。");
   return result;
@@ -199,7 +200,6 @@ function action(label, callback, className = "", mutation = false) {
   return button;
 }
 
-function cell() { return document.createElement("td"); }
 function sourceName(id) { return state.subscriptions.find((item) => item.id === id)?.name || id; }
 function nodeName(node) {
   const prefix = sourceName(node.subscription_id) + "-";
@@ -276,7 +276,7 @@ function applyFilters() { state.nodePage = 1; renderNodes(); }
 function countryName(info) {
   if (!info) return "—";
   try { return new Intl.DisplayNames(["zh-CN"], { type: "region" }).of(info.country_code) || info.country || "—"; }
-  catch (_) { return info.country || info.country_code || "—"; }
+  catch { return info.country || info.country_code || "—"; }
 }
 
 function scoreText(data) { return typeof data?.score === "number" ? String(data.score) : "—"; }
@@ -294,35 +294,35 @@ function probeStatus(id, kind) {
 }
 
 function renderNodeMetrics(row, node) {
-  const report = node.ip_check?.error ? null : node.ip_check?.data;
-  const latency = probeStatus(node.id, "latency") || (node.latency?.error ? "失败" : node.latency?.milliseconds != null ? node.latency.milliseconds + " ms" : "—");
-  const score = probeStatus(node.id, "ip-check") || (node.ip_check?.error ? "失败" : scoreText(report));
-  const values = [
-    ["出口 IP", report?.ip_info?.ip || "—", "", false],
-    ["国家 / 地区", countryName(report?.ip_info), "", false],
-    ["延迟", latency, node.latency?.error || "", !!node.latency?.error],
-    ["评分", score, node.ip_check?.error || "", !!node.ip_check?.error],
-  ];
-  values.forEach(([label, value, title, failed], index) => {
-    const cell = row.cells[index + 2];
-    cell.className = "node-metric" + (index === 0 ? " ip-cell" : "") + (failed ? " metric-error" : "");
-    cell.dataset.label = label;
-    cell.dataset.verdict = index === 3 ? report?.verdict || "" : "";
-    cell.textContent = value;
-    cell.title = title;
-  });
+  const report = ipReport(node);
+  const info = report?.ip_info;
+  const latency = nodeLatency(node);
+  row.querySelector(".ip-address").textContent = info?.ip || "—";
+  row.querySelector(".ip-location").textContent = info ? [countryName(info), info.city].filter(Boolean).join(" · ") : "";
+  for (const [kind, selector, result, value] of [
+    ["latency", ".latency-cell", node.latency, latency === null ? "—" : latency + " ms"],
+    ["ip-check", ".score-cell", node.ip_check, scoreText(report)],
+  ]) {
+    const cell = row.querySelector(selector);
+    const pending = probeStatus(node.id, kind);
+    cell.textContent = pending || (result?.error ? "失败" : !result ? "未检测" : value);
+    cell.classList.toggle("metric-error", !pending && !!result?.error);
+    cell.classList.toggle("metric-muted", !!pending || (!result?.error && value === "—"));
+    cell.dataset.verdict = kind === "ip-check" && !pending ? report?.verdict || "" : "";
+    cell.title = pending ? "" : result?.error || "";
+  }
 }
 
 function updateProbeNode(id) {
   renderFilter();
   renderNodes(false);
   const node = state.nodes.find((item) => item.id === id);
-  if (node && state.selectedID === id) renderDiagnostics(node);
+  if (node && state.detailID === id) renderDiagnostics(node);
 }
 
 function renderNodes(updateDetails = true) {
   const nodes = filteredNodes();
-  if (!state.nodes.some((node) => node.id === state.selectedID)) state.selectedID = "";
+  if (!state.nodes.some((node) => node.id === state.detailID)) state.detailID = "";
   const pageSize = Number($("page-size").value);
   const pages = Math.max(1, Math.ceil(nodes.length / pageSize));
   state.nodePage = Math.max(1, Math.min(state.nodePage, pages));
@@ -340,14 +340,12 @@ function renderNodes(updateDetails = true) {
   }
   visible.forEach((node, index) => {
     const row = existing.get(node.id) || createNodeRow(node.id);
-    row.classList.toggle("selected", state.selectedID === node.id);
     row.querySelector(".cell-title").textContent = nodeName(node);
-    row.querySelector(".protocol-name").textContent = node.protocol;
+    row.querySelector(".protocol-name").textContent = node.protocol.toUpperCase();
     row.querySelector(".source-label").textContent = sourceName(node.subscription_id);
     const choose = row.querySelector(".connect-action");
-    choose.textContent = state.selectedID === node.id ? "已选择" : "连接";
-    choose.setAttribute("aria-pressed", String(state.selectedID === node.id));
     choose.setAttribute("aria-label", "连接 " + node.name);
+    row.querySelector(".inspect-action").setAttribute("aria-label", "检测详情 " + node.name);
     renderNodeMetrics(row, node);
     if (body.rows[index] !== row) body.insertBefore(row, body.rows[index] || null);
   });
@@ -358,13 +356,7 @@ function renderNodes(updateDetails = true) {
   $("nodes-empty-title").textContent = state.nodes.length ? "没有匹配的节点" : "还没有节点";
   $("empty-add-button").hidden = state.nodes.length > 0;
   $("node-results").textContent = nodes.length === state.nodes.length ? `共 ${nodes.length} 个节点` : `${nodes.length} / ${state.nodes.length} 个节点`;
-  $("node-pagination").hidden = nodes.length === 0;
-  $("page-range").textContent = `${nodes.length ? offset + 1 : 0}–${Math.min(offset + pageSize, nodes.length)} / ${nodes.length}`;
-  if (document.activeElement !== $("page-number")) $("page-number").value = state.nodePage;
-  $("page-number").max = pages;
-  $("page-total").textContent = pages;
-  $("page-prev").disabled = state.nodePage === 1;
-  $("page-next").disabled = state.nodePage === pages;
+  renderPagination(nodes.length, pageSize, pages, offset);
   const activeFilters = extraFilterIDs.filter((id) => $(id).value !== "").length;
   $("filters-toggle").textContent = activeFilters ? `筛选 · ${activeFilters}` : "筛选";
   $("filters-reset").disabled = !filterIDs.some((id) => $(id).value !== "");
@@ -378,23 +370,67 @@ function renderNodes(updateDetails = true) {
 function createNodeRow(id) {
   const row = element("tr");
   row.dataset.nodeId = id;
-  const name = cell();
-  name.append(element("div", "cell-title"), element("span", "cell-detail protocol-name"));
-  const source = cell();
-  source.append(element("span", "source-label"));
-  const controls = cell();
+  const name = element("td");
+  const meta = element("div", "node-meta");
+  meta.append(element("span", "protocol-name"), element("span", "source-label"));
+  name.append(element("div", "cell-title"), meta);
+  const exit = element("td", "exit-cell");
+  exit.dataset.label = "出口 IP / 地区";
+  exit.append(element("span", "ip-address"), element("span", "ip-location"));
+  const latency = element("td", "node-metric latency-cell");
+  latency.dataset.label = "延迟";
+  const score = element("td", "node-metric score-cell");
+  score.dataset.label = "风险评分";
+  const controls = element("td");
   const buttons = element("div", "row-actions");
-  buttons.append(action("连接", () => selectNode(id), "connect-action"), action("详情", () => selectNode(id, "diagnostics"), "inspect-action"));
+  buttons.append(action("连接", (event) => openNode(id, "connection", event.currentTarget), "connect-action"), action("详情", (event) => openNode(id, "diagnostics", event.currentTarget), "inspect-action"));
+  for (const button of buttons.children) {
+    button.setAttribute("aria-haspopup", "dialog");
+    button.setAttribute("aria-controls", "connection-dialog");
+  }
   controls.append(buttons);
-  row.append(name, source, cell(), cell(), cell(), cell(), controls);
-  row.addEventListener("click", (event) => { if (!event.target.closest("button")) selectNode(id); });
+  row.append(name, exit, latency, score, controls);
   return row;
+}
+
+function renderPagination(total, pageSize, pages, offset) {
+  $("node-pagination").hidden = total === 0;
+  $("page-range").textContent = total ? `显示 ${offset + 1}–${Math.min(offset + pageSize, total)}，共 ${total} 个` : "";
+  $("page-number").max = pages;
+  $("page-total").textContent = pages;
+  $("page-jump").hidden = pages <= 5;
+  $("page-prev").disabled = state.nodePage === 1;
+  $("page-next").disabled = state.nodePage === pages;
+  const list = $("page-list");
+  const key = `${state.nodePage}/${pages}`;
+  if (list.dataset.pages === key) return;
+  const focused = list.contains(document.activeElement);
+  const current = state.nodePage;
+  const numbers = pages <= 5 ? Array.from({ length: pages }, (_, i) => i + 1)
+    : current <= 3 ? [1, 2, 3, null, pages]
+    : current >= pages - 2 ? [1, null, pages - 2, pages - 1, pages]
+    : [1, null, current, null, pages];
+  list.replaceChildren(...numbers.map((page) => {
+    if (page === null) {
+      const gap = element("span", "page-gap", "…");
+      gap.setAttribute("aria-hidden", "true");
+      return gap;
+    }
+    const button = element("button", "page-button", page);
+    button.type = "button";
+    button.dataset.page = page;
+    button.setAttribute("aria-label", `第 ${page} 页`);
+    if (page === current) button.setAttribute("aria-current", "page");
+    return button;
+  }));
+  list.dataset.pages = key;
+  if (focused) list.querySelector('[aria-current="page"]').focus({ preventScroll: true });
 }
 
 function changePage(page) {
   state.nodePage = Math.trunc(Number(page)) || 1;
   renderNodes();
-  $("page-number").value = state.nodePage;
+  $("page-list").querySelector('[aria-current="page"]').focus({ preventScroll: true });
   $("nodes-panel").scrollIntoView({ block: "start" });
 }
 
@@ -449,11 +485,12 @@ function exportNodes(format) {
   $("export-toggle").focus();
 }
 
-function selectNode(id, page = "connection") {
-  state.selectedID = id;
+function openNode(id, page, trigger) {
+  state.detailID = id;
   detailPage = page;
-  renderNodes();
-  $("nodes-body").querySelector('[aria-pressed="true"]')?.focus({ preventScroll: true });
+  detailTrigger = trigger;
+  renderConnection();
+  renderProbeControls(filteredNodes().length > 0);
   if (!$("connection-dialog").open) $("connection-dialog").showModal();
   const invalid = $("connection-panel").querySelector('[aria-invalid="true"]');
   (page === "diagnostics" ? $("diagnostics-tab") : invalid || $("connection-copy")).focus({ preventScroll: true });
@@ -469,7 +506,7 @@ function renderDetailPage() {
 
 function connectionValues(node) {
   let address;
-  try { address = new URL("socks5://" + $("socks-address").value.trim()); } catch (_) { /* Explain the invalid field below. */ }
+  try { address = new URL("socks5://" + $("socks-address").value.trim()); } catch {}
   if (!address?.hostname || !address.port || address.username || address.password || address.search || address.hash || (address.pathname && address.pathname !== "/")) {
     $("socks-address").setAttribute("aria-invalid", "true");
     throw new Error("代理地址无效");
@@ -483,7 +520,7 @@ function connectionValues(node) {
 function shellQuote(value) { return "'" + value.replace(/'/g, "'\"'\"'") + "'"; }
 
 function renderConnection() {
-  const node = state.nodes.find((item) => item.id === state.selectedID);
+  const node = state.nodes.find((item) => item.id === state.detailID);
   $("connection-details").hidden = !node;
   $("connection-preview").value = "";
   $("selected-username").value = node?.username || "";
@@ -518,14 +555,14 @@ async function copyInput(input, label) {
   try {
     await navigator.clipboard.writeText(input.value);
     copied = true;
-  } catch (_) {
+  } catch {
     const focused = document.activeElement;
     const { selectionStart, selectionEnd } = input;
     try {
       input.focus({ preventScroll: true });
       input.select();
       copied = document.execCommand("copy");
-    } catch (_) { /* Report a blocked clipboard below. */ }
+    } catch {}
     finally {
       input.setSelectionRange(selectionStart, selectionEnd);
       focused?.focus({ preventScroll: true });
@@ -537,7 +574,7 @@ async function copyInput(input, label) {
 
 function renderProbeControls(hasNodes) {
   for (const [kind, prefix, label] of [["latency", "latency", "延迟探测"], ["ip-check", "ip", "IP 检测"]]) {
-    const status = probeStatus(state.selectedID, kind);
+    const status = probeStatus(state.detailID, kind);
     $(prefix + "-test").disabled = !!status;
     $(prefix + "-test").textContent = status || label;
     $(prefix + "-all").disabled = !!batch || probes.size > 0 || !hasNodes;
@@ -574,7 +611,7 @@ async function probeNode(id, kind) {
     if (currentSession === session && error.name !== "AbortError" && !error.unauthorized) {
       const node = state.nodes.find((item) => item.id === id);
       if (node) node[field] = { checked_at: new Date().toISOString(), error: error.message };
-      if (!batch && state.selectedID !== id) notify("检测失败：" + error.message, true);
+      if (!batch && state.detailID !== id) notify("检测失败：" + error.message, true);
     }
     return false;
   } finally {
@@ -585,7 +622,7 @@ async function probeNode(id, kind) {
   }
 }
 
-async function probeVisible(kind) {
+async function probeFiltered(kind) {
   if (batch || probes.size) return;
   const ids = filteredNodes().map((node) => node.id);
   if (!ids.length) return;
@@ -624,7 +661,7 @@ async function probeVisible(kind) {
       batch = null;
       for (const id of ids) if (probes.get(id + ":" + kind) === controller) probes.delete(id + ":" + kind);
       $("probe-progress").textContent = job.stopped ? `已停止 · ${job.done} / ${ids.length}` : `检测完成 · ${job.done - job.failed} 成功${job.failed ? " / " + job.failed + " 失败" : ""}`;
-      updateProbeNode(state.selectedID);
+      updateProbeNode(state.detailID);
     }
   }
 }
@@ -713,16 +750,16 @@ function renderSubscriptions() {
   const rows = document.createDocumentFragment();
   for (const subscription of state.subscriptions) {
     const row = document.createElement("tr");
-    const name = cell();
+    const name = element("td");
     const url = element("code", "cell-detail subscription-url", subscription.url);
     url.title = subscription.url;
     name.append(element("div", "cell-title", subscription.name), url, element("span", "cell-detail", "每 " + subscription.refresh_interval + " 自动更新"));
-    const count = cell();
+    const count = element("td");
     count.textContent = subscription.node_count;
-    const sync = cell();
+    const sync = element("td");
     sync.append(element("span", "sync-state" + (subscription.last_error ? " failed" : ""), subscription.last_error ? "更新失败" : subscription.last_success_at ? "已同步" : "尚未同步"), element("span", "cell-detail", "最近成功 " + dateTime(subscription.last_success_at)));
     if (subscription.last_error) sync.append(element("span", "cell-detail error-detail", subscription.last_error));
-    const controls = cell();
+    const controls = element("td");
     const buttons = element("div", "row-actions");
     buttons.append(action("刷新", (event) => refreshSubscription(subscription, event.currentTarget), "", true), action("编辑", () => openSubscription(subscription), "", true), action("删除", () => openDelete(subscription), "delete-action", true));
     controls.append(buttons);
@@ -800,7 +837,7 @@ async function mutate(path, options, success, button, dialogID = "", errorID = "
       if (errorID) formError(errorID, error.message);
       else {
         notify(error.message, true);
-        try { await loadData(); } catch (_) { /* Keep the original operation error visible. */ }
+        try { await loadData(); } catch { /* Keep the original operation error visible. */ }
       }
     }
   } finally {
@@ -819,7 +856,7 @@ function defaultAddress(address) {
     const url = new URL("socks5://" + address);
     if (["0.0.0.0", "[::]"].includes(url.hostname)) url.hostname = location.hostname;
     return url.host;
-  } catch (_) { return address; }
+  } catch { return address; }
 }
 
 function revealApp() {
@@ -901,8 +938,15 @@ $("filters-reset").addEventListener("click", () => {
 $("page-size").addEventListener("change", applyFilters);
 $("page-prev").addEventListener("click", () => changePage(state.nodePage - 1));
 $("page-next").addEventListener("click", () => changePage(state.nodePage + 1));
-$("page-number").addEventListener("change", () => changePage($("page-number").value));
-$("page-number").addEventListener("keydown", (event) => { if (event.key === "Enter") changePage(event.currentTarget.value); });
+$("page-list").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-page]");
+  if (button) changePage(button.dataset.page);
+});
+$("page-jump").addEventListener("submit", (event) => {
+  event.preventDefault();
+  changePage($("page-number").value);
+  $("page-number").value = "";
+});
 $("export-toggle").addEventListener("click", () => setExportOpen($("export-options").hidden));
 document.querySelectorAll("[data-export]").forEach((button) => button.addEventListener("click", () => exportNodes(button.dataset.export)));
 document.addEventListener("click", (event) => { if (!event.target.closest(".export-control")) setExportOpen(false); });
@@ -919,13 +963,15 @@ $("connection-copy").addEventListener("click", () => copyInput($("connection-pre
 $("username-copy").addEventListener("click", () => copyInput($("selected-username"), "用户名"));
 $("connection-close").addEventListener("click", () => $("connection-dialog").close());
 $("connection-dialog").addEventListener("close", () => {
-  if (!$("app").hidden) $("nodes-body").querySelector('[aria-pressed="true"]')?.focus({ preventScroll: true });
+  if (!$("app").hidden) (detailTrigger?.isConnected ? detailTrigger : $("node-search")).focus({ preventScroll: true });
+  detailTrigger = null;
+  state.detailID = "";
 });
 for (const page of ["connection", "diagnostics"]) $(page + "-tab").addEventListener("click", () => { detailPage = page; renderDetailPage(); });
-$("latency-test").addEventListener("click", () => probeNode(state.selectedID, "latency"));
-$("ip-test").addEventListener("click", () => probeNode(state.selectedID, "ip-check"));
-$("latency-all").addEventListener("click", () => probeVisible("latency"));
-$("ip-all").addEventListener("click", () => probeVisible("ip-check"));
+$("latency-test").addEventListener("click", () => probeNode(state.detailID, "latency"));
+$("ip-test").addEventListener("click", () => probeNode(state.detailID, "ip-check"));
+$("latency-all").addEventListener("click", () => probeFiltered("latency"));
+$("ip-all").addEventListener("click", () => probeFiltered("ip-check"));
 $("probe-stop").addEventListener("click", stopProbes);
 $("logout-button").addEventListener("click", () => showLogin());
 $("boot-retry").addEventListener("click", start);

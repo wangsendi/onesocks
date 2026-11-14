@@ -9,6 +9,9 @@ socks_password: ""
 # When set, every API request needs Authorization: Bearer <token>.
 api_token: ""
 
+# Shared limit for single and batch node probes; excess probes wait in a queue.
+probe_concurrency: 16
+
 # Bind upstream connections, node DNS and subscription downloads to this interface.
 # Empty follows system routing; set e.g. eth0 to bypass a local TUN route.
 outbound_interface: eth0

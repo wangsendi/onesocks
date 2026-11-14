@@ -13,7 +13,6 @@
   <script src="/assets/app.js" defer></script>
 </head>
 <body>
-  <!-- Embedded node and subscription management. -->
   <svg class="icon-sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
     <symbol id="icon-nodes" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></symbol>
     <symbol id="icon-link" viewBox="0 0 24 24"><path d="m10 13 4-4m-6 6-1 1a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0m2 2 1-1a4 4 0 0 1 6 6l-4 4a4 4 0 0 1-6 0"/></symbol>
@@ -82,12 +81,13 @@
               </div>
               <div class="list-meta"><span id="node-results">加载中…</span><span id="probe-progress" role="status"></span><span id="last-sync"></span></div>
               <div id="nodes-content" class="data-surface" aria-busy="false">
-                <table class="node-table"><thead><tr><th scope="col">节点 / 协议</th><th scope="col">订阅来源</th><th scope="col">出口 IP</th><th scope="col">国家/地区</th><th scope="col">延迟</th><th scope="col">评分</th><th scope="col" class="actions-heading">操作</th></tr></thead><tbody id="nodes-body"></tbody></table>
+                <table class="node-table" aria-label="节点列表"><thead><tr><th scope="col">节点</th><th scope="col">出口 IP / 地区</th><th scope="col" class="metric-heading">延迟</th><th scope="col" class="metric-heading">风险评分</th><th scope="col" class="actions-heading">操作</th></tr></thead><tbody id="nodes-body"></tbody></table>
                 <div id="nodes-empty" class="empty-state" hidden><span class="empty-icon"><svg class="icon" aria-hidden="true"><use href="#icon-nodes"/></svg></span><h2 id="nodes-empty-title">还没有节点</h2><button id="empty-add-button" class="button primary" type="button">添加第一个订阅</button></div>
               </div>
               <nav id="node-pagination" class="pagination" aria-label="节点分页" hidden>
-                <div class="pagination-summary"><span id="page-range"></span><label for="page-size" class="sr-only">每页节点数</label><select id="page-size"><option value="10">10 条/页</option><option value="20" selected>20 条/页</option><option value="50">50 条/页</option><option value="100">100 条/页</option></select></div>
-                <div class="pagination-controls"><button id="page-prev" class="button secondary" type="button">上一页</button><label for="page-number" class="sr-only">当前页码</label><input id="page-number" type="number" min="1" value="1" inputmode="numeric"><span>/ <span id="page-total">1</span> 页</span><button id="page-next" class="button secondary" type="button">下一页</button></div>
+                <div class="pagination-summary"><span id="page-range" role="status"></span><label for="page-size" class="sr-only">每页节点数</label><select id="page-size"><option value="10">10 条/页</option><option value="20" selected>20 条/页</option><option value="50">50 条/页</option><option value="100">100 条/页</option></select></div>
+                <div class="pagination-controls"><button id="page-prev" class="page-button" type="button" aria-label="上一页"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m14 7-5 5 5 5"/></svg></button><div id="page-list" class="page-list"></div><button id="page-next" class="page-button" type="button" aria-label="下一页"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m10 7 5 5-5 5"/></svg></button></div>
+                <form id="page-jump" class="page-jump"><span>共 <span id="page-total">1</span> 页</span><label for="page-number">跳至</label><input id="page-number" type="number" min="1" step="1" required inputmode="numeric" aria-label="跳转页码"><button class="page-button" type="submit">跳转</button></form>
               </nav>
             </div>
         </section>

@@ -22,6 +22,7 @@ type testBackend struct {
 	active   atomic.Int32
 	dials    atomic.Int32
 	dial     func(context.Context, string, string) (net.Conn, error)
+	released chan struct{}
 }
 
 func (b *testBackend) Acquire(username string) (domain.Lease, error) {
@@ -46,7 +47,12 @@ func (l *testLease) DialContext(ctx context.Context, network, address string) (n
 }
 
 func (l *testLease) Close() error {
-	l.once.Do(func() { l.backend.active.Add(-1) })
+	l.once.Do(func() {
+		l.backend.active.Add(-1)
+		if l.backend.released != nil {
+			l.backend.released <- struct{}{}
+		}
+	})
 	return nil
 }
 
@@ -131,6 +137,7 @@ func TestAuthenticationAndLeaseRelease(t *testing.T) {
 		{"unknown", "n_test", "missing", "p", "", 1},
 		{"wrong password", "n_test", "n_test", "wrong", "secret", 1},
 		{"shared password", "n_test", "n_test", "secret", "secret", 0},
+		{"empty username", "", "", "p", "", 1},
 		{"empty password", "n_test", "n_test", "", "", 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -154,7 +161,7 @@ func TestRequiresUsernamePassword(t *testing.T) {
 }
 
 func TestUnsupportedCommandsNeverDial(t *testing.T) {
-	for _, command := range []byte{2, 3} {
+	for _, command := range []byte{2, 3, 255} {
 		t.Run(strconv.Itoa(int(command)), func(t *testing.T) {
 			backend := &testBackend{username: "n_test"}
 			address, _, _ := startServer(t, backend, Config{})
@@ -245,18 +252,33 @@ func TestRequestAddressForms(t *testing.T) {
 	}{
 		{"IPv4", []byte{1, 127, 0, 0, 1}, "127.0.0.1:443"},
 		{"IPv6", append([]byte{4}, net.ParseIP("2001:db8::1").To16()...), "[2001:db8::1]:443"},
-		{"domain", append([]byte{3, 11}, []byte("example.com")...), "example.com:443"},
+		{"unresolvable domain", append([]byte{3, 18}, []byte("proxy-only.invalid")...), "proxy-only.invalid:443"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			left, right := net.Pipe()
-			defer left.Close()
-			defer right.Close()
+			dialed := make(chan string, 1)
+			backend := &testBackend{username: "n_test", dial: func(_ context.Context, network, address string) (net.Conn, error) {
+				if network != "tcp" {
+					t.Errorf("network = %q, want tcp", network)
+				}
+				dialed <- address
+				return nil, syscall.ECONNREFUSED
+			}}
+			address, _, _ := startServer(t, backend, Config{})
+			conn := connect(t, address)
+			authenticate(t, conn, "n_test", "p", false, 0)
 			packet := append([]byte{5, 1, 0}, tc.addr...)
 			packet = append(packet, 1, 187)
-			go func() { _ = writeAll(left, packet) }()
-			got, code, err := readRequest(right)
-			if err != nil || code != 0 || got != tc.want {
-				t.Fatalf("address = %q, code=%d, err=%v", got, code, err)
+			if err := writeAll(conn, packet); err != nil {
+				t.Fatal(err)
+			}
+			readReply(t, conn, 5)
+			select {
+			case got := <-dialed:
+				if got != tc.want {
+					t.Fatalf("address = %q, want %q", got, tc.want)
+				}
+			default:
+				t.Fatal("request did not reach the selected lease")
 			}
 		})
 	}
@@ -298,7 +320,9 @@ func TestDialFailureReturnsSOCKSError(t *testing.T) {
 	}{
 		{"refused", syscall.ECONNREFUSED, 5},
 		{"network unreachable", syscall.ENETUNREACH, 3},
+		{"host unreachable", syscall.EHOSTUNREACH, 4},
 		{"timeout", context.DeadlineExceeded, 6},
+		{"generic failure", errors.New("dial failed"), 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			backend := &testBackend{username: "n_test", dial: func(context.Context, string, string) (net.Conn, error) {
@@ -338,5 +362,171 @@ func TestCancellationClosesEstablishedSession(t *testing.T) {
 	var netErr net.Error
 	if errors.As(err, &netErr) && netErr.Timeout() {
 		t.Fatal("upstream was not closed by cancellation")
+	}
+}
+
+func TestInvalidRequestsNeverDial(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		packet []byte
+		code   byte
+	}{
+		{"version", []byte{4, 1, 0, 1}, 1},
+		{"reserved byte", []byte{5, 1, 1, 1}, 1},
+		{"address type", []byte{5, 1, 0, 255}, 8},
+		{"empty domain", []byte{5, 1, 0, 3, 0}, 8},
+		{"zero port", []byte{5, 1, 0, 1, 127, 0, 0, 1, 0, 0}, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			backend := &testBackend{username: "n_test", released: make(chan struct{}, 1)}
+			address, _, _ := startServer(t, backend, Config{})
+			conn := connect(t, address)
+			authenticate(t, conn, "n_test", "p", false, 0)
+			if err := writeAll(conn, tc.packet); err != nil {
+				t.Fatal(err)
+			}
+			readReply(t, conn, tc.code)
+			select {
+			case <-backend.released:
+			case <-time.After(time.Second):
+				t.Fatal("rejected request kept its lease")
+			}
+			if backend.dials.Load() != 0 {
+				t.Fatal("invalid request triggered outbound dial")
+			}
+		})
+	}
+}
+
+func TestIncompleteRequestReleasesAuthenticatedLease(t *testing.T) {
+	backend := &testBackend{username: "n_test", released: make(chan struct{}, 1)}
+	address, _, _ := startServer(t, backend, Config{})
+	conn := connect(t, address)
+	authenticate(t, conn, "n_test", "p", false, 0)
+	if got := backend.active.Load(); got != 1 {
+		t.Fatalf("authentication pinned %d leases, want 1", got)
+	}
+	if err := writeAll(conn, []byte{5, 1, 0, 3, 18, 'p'}); err != nil {
+		t.Fatal(err)
+	}
+	_ = conn.Close()
+	select {
+	case <-backend.released:
+	case <-time.After(time.Second):
+		t.Fatal("incomplete request kept its lease until server shutdown")
+	}
+	if backend.dials.Load() != 0 {
+		t.Fatal("incomplete request triggered outbound dial")
+	}
+}
+
+func writeAll(w io.Writer, data []byte) error {
+	for len(data) != 0 {
+		n, err := w.Write(data)
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return io.ErrShortWrite
+		}
+		data = data[n:]
+	}
+	return nil
+}
+
+func TestHandshakeTimeoutClosesIncompleteSessions(t *testing.T) {
+	for _, stage := range []string{"greeting", "credentials", "request"} {
+		t.Run(stage, func(t *testing.T) {
+			backend := &testBackend{username: "n_test", released: make(chan struct{}, 1)}
+			address, _, _ := startServer(t, backend, Config{HandshakeTimeout: 200 * time.Millisecond})
+			conn := connect(t, address)
+			switch stage {
+			case "greeting":
+				if err := writeAll(conn, []byte{5}); err != nil {
+					t.Fatal(err)
+				}
+			case "credentials":
+				if err := writeAll(conn, []byte{5, 1, 2}); err != nil {
+					t.Fatal(err)
+				}
+				expectBytes(t, conn, []byte{5, 2})
+				if err := writeAll(conn, []byte{1, 6, 'n'}); err != nil {
+					t.Fatal(err)
+				}
+			case "request":
+				authenticate(t, conn, "n_test", "p", false, 0)
+			}
+			_, err := io.ReadAll(conn)
+			var netErr net.Error
+			if errors.As(err, &netErr) && netErr.Timeout() {
+				t.Fatal("incomplete handshake outlived the server deadline")
+			}
+			if stage == "request" {
+				select {
+				case <-backend.released:
+				case <-time.After(time.Second):
+					t.Fatal("handshake timeout kept the authenticated lease")
+				}
+			}
+			if backend.dials.Load() != 0 {
+				t.Fatal("incomplete handshake triggered outbound dial")
+			}
+		})
+	}
+}
+
+func TestDialTimeoutReturnsTTLExpired(t *testing.T) {
+	backend := &testBackend{username: "n_test", released: make(chan struct{}, 1), dial: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}}
+	address, _, _ := startServer(t, backend, Config{DialTimeout: 20 * time.Millisecond})
+	conn := connect(t, address)
+	authenticate(t, conn, "n_test", "p", false, 0)
+	if err := writeAll(conn, []byte{5, 1, 0, 1, 127, 0, 0, 1, 0, 80}); err != nil {
+		t.Fatal(err)
+	}
+	readReply(t, conn, 6)
+	select {
+	case <-backend.released:
+	case <-time.After(time.Second):
+		t.Fatal("dial timeout kept the lease")
+	}
+}
+
+type authReplyFailureConn struct{ net.Conn }
+
+func (c authReplyFailureConn) Write(p []byte) (int, error) {
+	if len(p) == 2 && p[0] == 1 && p[1] == 0 {
+		return 0, io.ErrClosedPipe
+	}
+	return c.Conn.Write(p)
+}
+
+func TestAuthenticationReplyFailureReleasesLease(t *testing.T) {
+	backend := &testBackend{username: "n_test"}
+	client, server := net.Pipe()
+	defer client.Close()
+	defer server.Close()
+	_ = client.SetDeadline(time.Now().Add(time.Second))
+	done := make(chan struct{})
+	go func() {
+		New(backend, Config{}).handle(context.Background(), authReplyFailureConn{server})
+		close(done)
+	}()
+	if err := writeAll(client, []byte{5, 1, 2}); err != nil {
+		t.Fatal(err)
+	}
+	expectBytes(t, client, []byte{5, 2})
+	if err := writeAll(client, []byte{1, 6, 'n', '_', 't', 'e', 's', 't', 1, 'p'}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("failed authentication reply left the session running")
+	}
+	if backend.active.Load() != 0 || backend.dials.Load() != 0 {
+		t.Fatal("failed authentication reply leaked a lease or dialed upstream")
 	}
 }

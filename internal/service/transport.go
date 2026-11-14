@@ -11,7 +11,6 @@ import (
 func newSubscriptionTransport(options Options) *http.Transport {
 	transport := &http.Transport{
 		TLSHandshakeTimeout: 10 * time.Second,
-		DisableCompression:  true,
 	}
 	if options.OutboundInterface != "" {
 		transport.DialContext = newBoundSubscriptionDialer(options).DialContext

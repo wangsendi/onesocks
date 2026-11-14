@@ -2,13 +2,14 @@ package domain
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
 	"net"
 	"reflect"
-	"sort"
+	"slices"
 	"time"
 )
 
@@ -54,7 +55,7 @@ func UniqueNodes(nodes []NodeSpec) []NodeSpec {
 	for _, node := range byName {
 		result = append(result, node)
 	}
-	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
+	slices.SortFunc(result, func(a, b NodeSpec) int { return cmp.Compare(a.Name, b.Name) })
 	return result
 }
 

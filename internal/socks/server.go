@@ -2,19 +2,18 @@
 package socks
 
 import (
-	"bytes"
 	"context"
-	"crypto/subtle"
-	"encoding/binary"
 	"errors"
 	"io"
 	"net"
-	"strconv"
 	"sync"
-	"syscall"
 	"time"
 
 	"onesocks/internal/domain"
+
+	"github.com/sagernet/sing/common/bufio"
+	socks5 "github.com/things-go/go-socks5"
+	"github.com/things-go/go-socks5/statute"
 )
 
 type Backend interface {
@@ -98,27 +97,37 @@ func (s *Server) handle(ctx context.Context, client net.Conn) {
 		return
 	}
 	_ = client.SetDeadline(time.Now().Add(s.cfg.HandshakeTimeout))
-	lease, err := s.authenticate(client)
-	if err != nil {
-		return
-	}
-	defer lease.Close()
-	address, replyCode, err := readRequest(client)
-	if err != nil {
-		if replyCode != 0 {
-			_ = reply(client, replyCode, nil)
+	auth := &nodeAuthenticator{backend: s.backend, password: s.cfg.Password}
+	defer func() {
+		if auth.lease != nil {
+			_ = auth.lease.Close()
 		}
-		return
+	}()
+	// Each authenticator owns one session's lease, including when parsing or
+	// writing the handshake fails before the CONNECT handler is reached.
+	handler := socks5.NewServer(
+		socks5.WithAuthMethods([]socks5.Authenticator{auth}),
+		socks5.WithResolver(remoteResolver{}),
+		socks5.WithConnectHandle(func(_ context.Context, _ io.Writer, request *socks5.Request) error {
+			// ServeConn starts with context.Background; retain our service context.
+			return s.connect(ctx, client, auth.lease, request)
+		}),
+	)
+	_ = handler.ServeConn(client)
+}
+
+func (s *Server) connect(ctx context.Context, client net.Conn, lease domain.Lease, request *socks5.Request) error {
+	if request.RawDestAddr.Port == 0 {
+		return reply(client, statute.RepServerFailure, nil)
 	}
 	// Handshake deadlines do not constrain the lifetime of a forwarded session.
 	_ = client.SetDeadline(time.Time{})
 	dialCtx, cancel := context.WithTimeout(ctx, s.cfg.DialTimeout)
-	upstream, err := lease.DialContext(dialCtx, "tcp", address)
+	upstream, err := lease.DialContext(dialCtx, "tcp", request.RawDestAddr.String())
 	cancel()
 	if err != nil {
 		_ = client.SetWriteDeadline(time.Now().Add(s.cfg.HandshakeTimeout))
-		_ = reply(client, dialErrorCode(err), nil)
-		return
+		return reply(client, dialErrorCode(err), nil)
 	}
 	defer upstream.Close()
 	stop := context.AfterFunc(ctx, func() {
@@ -127,184 +136,11 @@ func (s *Server) handle(ctx context.Context, client net.Conn) {
 	})
 	defer stop()
 	_ = client.SetWriteDeadline(time.Now().Add(s.cfg.HandshakeTimeout))
-	if err := reply(client, 0, upstream.LocalAddr()); err != nil {
-		return
+	if err := reply(client, statute.RepSuccess, upstream.LocalAddr()); err != nil {
+		return err
 	}
 	_ = client.SetDeadline(time.Time{})
-	relay(client, upstream)
-}
-
-func (s *Server) authenticate(conn net.Conn) (domain.Lease, error) {
-	var header [2]byte
-	if _, err := io.ReadFull(conn, header[:]); err != nil {
-		return nil, err
-	}
-	if header[0] != 5 || header[1] == 0 {
-		_ = writeAll(conn, []byte{5, 0xff})
-		return nil, errors.New("invalid SOCKS5 greeting")
-	}
-	methods := make([]byte, int(header[1]))
-	if _, err := io.ReadFull(conn, methods); err != nil {
-		return nil, err
-	}
-	if !bytes.Contains(methods, []byte{2}) {
-		_ = writeAll(conn, []byte{5, 0xff})
-		return nil, errors.New("username/password authentication required")
-	}
-	if err := writeAll(conn, []byte{5, 2}); err != nil {
-		return nil, err
-	}
-	reject := func(message string) (domain.Lease, error) {
-		_ = writeAll(conn, []byte{1, 1})
-		return nil, errors.New(message)
-	}
-	if _, err := io.ReadFull(conn, header[:]); err != nil {
-		return nil, err
-	}
-	if header[0] != 1 || header[1] == 0 {
-		return reject("invalid authentication request")
-	}
-	username := make([]byte, int(header[1]))
-	if _, err := io.ReadFull(conn, username); err != nil {
-		return nil, err
-	}
-	var passwordLength [1]byte
-	if _, err := io.ReadFull(conn, passwordLength[:]); err != nil {
-		return nil, err
-	}
-	if passwordLength[0] == 0 {
-		return reject("empty password")
-	}
-	password := make([]byte, int(passwordLength[0]))
-	if _, err := io.ReadFull(conn, password); err != nil {
-		return nil, err
-	}
-	if s.cfg.Password != "" && subtle.ConstantTimeCompare(password, []byte(s.cfg.Password)) != 1 {
-		return reject("authentication failed")
-	}
-	lease, err := s.backend.Acquire(string(username))
-	if err != nil {
-		return reject("authentication failed")
-	}
-	if err := writeAll(conn, []byte{1, 0}); err != nil {
-		_ = lease.Close()
-		return nil, err
-	}
-	return lease, nil
-}
-
-func readRequest(conn net.Conn) (string, byte, error) {
-	var header [4]byte
-	if _, err := io.ReadFull(conn, header[:]); err != nil {
-		return "", 0, err
-	}
-	if header[0] != 5 || header[2] != 0 {
-		return "", 1, errors.New("invalid SOCKS5 request")
-	}
-	if header[1] != 1 {
-		return "", 7, errors.New("unsupported SOCKS5 command")
-	}
-	var size int
-	switch header[3] {
-	case 1:
-		size = net.IPv4len
-	case 4:
-		size = net.IPv6len
-	case 3:
-		var length [1]byte
-		if _, err := io.ReadFull(conn, length[:]); err != nil {
-			return "", 0, err
-		}
-		size = int(length[0])
-		if size == 0 {
-			return "", 8, errors.New("empty destination hostname")
-		}
-	default:
-		return "", 8, errors.New("unsupported address type")
-	}
-	address := make([]byte, size)
-	if _, err := io.ReadFull(conn, address); err != nil {
-		return "", 0, err
-	}
-	host := string(address)
-	if header[3] != 3 {
-		host = net.IP(address).String()
-	}
-	var portBytes [2]byte
-	if _, err := io.ReadFull(conn, portBytes[:]); err != nil {
-		return "", 0, err
-	}
-	port := binary.BigEndian.Uint16(portBytes[:])
-	if port == 0 {
-		return "", 1, errors.New("invalid destination port")
-	}
-	return net.JoinHostPort(host, strconv.Itoa(int(port))), 0, nil
-}
-
-func reply(conn net.Conn, code byte, bound net.Addr) error {
-	packet := []byte{5, code, 0, 1, 0, 0, 0, 0, 0, 0}
-	addr, ok := bound.(*net.TCPAddr)
-	if !ok || addr == nil {
-		return writeAll(conn, packet)
-	}
-	if ipv4 := addr.IP.To4(); ipv4 != nil {
-		copy(packet[4:8], ipv4)
-	} else if ipv6 := addr.IP.To16(); ipv6 != nil {
-		packet = make([]byte, 22)
-		copy(packet, []byte{5, code, 0, 4})
-		copy(packet[4:20], ipv6)
-	}
-	binary.BigEndian.PutUint16(packet[len(packet)-2:], uint16(addr.Port))
-	return writeAll(conn, packet)
-}
-
-func dialErrorCode(err error) byte {
-	var netErr net.Error
-	switch {
-	case errors.Is(err, syscall.ENETUNREACH):
-		return 3
-	case errors.Is(err, syscall.EHOSTUNREACH):
-		return 4
-	case errors.Is(err, syscall.ECONNREFUSED):
-		return 5
-	case errors.Is(err, context.DeadlineExceeded), errors.As(err, &netErr) && netErr.Timeout():
-		return 6
-	default:
-		return 1
-	}
-}
-
-func writeAll(w io.Writer, data []byte) error {
-	for len(data) != 0 {
-		n, err := w.Write(data)
-		if err != nil {
-			return err
-		}
-		if n == 0 {
-			return io.ErrShortWrite
-		}
-		data = data[n:]
-	}
-	return nil
-}
-
-func relay(client, upstream net.Conn) {
-	done := make(chan error, 2)
-	copyStream := func(dst, src net.Conn) {
-		_, err := io.Copy(dst, src)
-		if half, ok := dst.(interface{ CloseWrite() error }); ok {
-			_ = half.CloseWrite()
-		} else {
-			// Generic connections cannot represent TCP's write-side EOF.
-			_ = dst.Close()
-		}
-		done <- err
-	}
-	go copyStream(upstream, client)
-	go copyStream(client, upstream)
-	if err := <-done; err != nil {
-		_ = client.Close()
-		_ = upstream.Close()
-	}
-	<-done
+	// ServeConn buffers input while parsing. Forward any already-read payload
+	// through the same reader, while retaining TCP half-close on the socket.
+	return bufio.CopyConn(ctx, &bufferedConn{Conn: client, reader: request.Reader}, upstream)
 }

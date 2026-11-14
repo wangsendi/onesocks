@@ -94,6 +94,7 @@ func TestAuthenticationRequiredBeforeMutation(t *testing.T) {
 func TestConfigReturnsOriginalValuesWithAPIAuthentication(t *testing.T) {
 	for _, token := range []string{"", "admin-token"} {
 		cfg := config.Config{SOCKSListen: "127.0.0.1:10801", APIListen: "127.0.0.1:10802", DataDir: "/tmp/onesocks", SOCKSPassword: "p@ss:'\"$x", APIToken: token, OutboundInterface: "eth0"}
+		cfg.ProbeConcurrency = 3
 		h := New(&fakeService{}, cfg)
 		if token != "" {
 			w := request(h, http.MethodGet, "/api/config", "", "")
@@ -145,7 +146,7 @@ func (f *batchProbeService) Probe(ctx context.Context, id, kind string) (domain.
 	return f.probe(ctx, id, kind)
 }
 
-func TestBatchProbesStartAllAndStreamIndividualResults(t *testing.T) {
+func TestBatchProbesWithinLimitStreamIndividualResults(t *testing.T) {
 	for _, kind := range []string{"latency", "ip-check"} {
 		t.Run(kind, func(t *testing.T) {
 			const count = 12
@@ -477,8 +478,6 @@ func TestMutationHandlersPreserveRequestContext(t *testing.T) {
 		{http.MethodPost, "/api/subscriptions/s_1/refresh", ""},
 		{http.MethodDelete, "/api/subscriptions/s_1", ""},
 		{http.MethodDelete, "/api/subscribe/s_1", ""},
-		{http.MethodPost, "/api/nodes/n_1/latency", ""},
-		{http.MethodPost, "/api/nodes/n_1/ip-check", ""},
 	} {
 		f := &fakeService{}
 		h := New(f, config.Config{})

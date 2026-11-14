@@ -312,7 +312,10 @@ func TestLargeSubscriptionPlainAndGzip(t *testing.T) {
 	}
 	for encoding, body := range map[string][]byte{"identity": payload, "gzip": compressed.Bytes()} {
 		t.Run(encoding, func(t *testing.T) {
-			source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if got := r.Header.Get("Accept-Encoding"); got != "gzip" {
+					t.Errorf("Accept-Encoding = %q, want gzip", got)
+				}
 				w.Header().Set("Content-Encoding", encoding)
 				_, _ = w.Write(body)
 			}))
@@ -322,6 +325,47 @@ func TestLargeSubscriptionPlainAndGzip(t *testing.T) {
 			sub := createSubscription(t, m, "large", source.URL)
 			if sub.Subscription.NodeCount != 1 || len(m.Nodes("").Items) != 1 {
 				t.Fatal("large subscription did not retain its node")
+			}
+		})
+	}
+}
+
+func TestSubscriptionContentEncoding(t *testing.T) {
+	payload := []byte(document(ssNode("encoded", 1001)))
+	var compressed bytes.Buffer
+	gz := gzip.NewWriter(&compressed)
+	if _, err := gz.Write(payload); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, encoding string
+		body           []byte
+		fails          bool
+	}{
+		{"unencoded", "", payload, false},
+		{"mixed-case gzip", "GZip", compressed.Bytes(), false},
+		{"invalid gzip", "gzip", payload, true},
+		{"truncated gzip", "gzip", compressed.Bytes()[:compressed.Len()-4], true},
+		{"unsupported encoding", "br", payload, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Encoding", tc.encoding)
+				_, _ = w.Write(tc.body)
+			}))
+			defer source.Close()
+			m := newManager(t, t.TempDir(), &fakeFactory{}, time.Second)
+			result, err := m.Create(context.Background(), domain.SubscriptionInput{Name: "encoded", URL: source.URL})
+			if tc.fails {
+				requireErrorCode(t, err, "fetch_failed")
+				if len(m.Subscriptions()) != 0 || len(m.Nodes("").Items) != 0 {
+					t.Fatal("invalid response changed the subscription state")
+				}
+			} else if err != nil || result.Subscription.NodeCount != 1 {
+				t.Fatalf("nodes = %d, error = %v", result.Subscription.NodeCount, err)
 			}
 		})
 	}

@@ -12,6 +12,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const DefaultProbeConcurrency = 16
+
 type Config struct {
 	SOCKSListen       string `yaml:"socks_listen" json:"socks_listen"`
 	APIListen         string `yaml:"api_listen" json:"api_listen"`
@@ -19,12 +21,35 @@ type Config struct {
 	SOCKSPassword     string `yaml:"socks_password" json:"socks_password"`
 	APIToken          string `yaml:"api_token" json:"api_token"`
 	OutboundInterface string `yaml:"outbound_interface" json:"outbound_interface"`
+	ProbeConcurrency  int    `yaml:"probe_concurrency" json:"probe_concurrency"`
 }
 
 func Default() Config {
 	return Config{
 		SOCKSListen: "127.0.0.1:1080", APIListen: "127.0.0.1:8080", DataDir: "data",
+		ProbeConcurrency: DefaultProbeConcurrency,
 	}
+}
+
+func (c *Config) UnmarshalYAML(node *yaml.Node) error {
+	type values Config
+	if err := node.Decode((*values)(c)); err != nil {
+		return err
+	}
+	// yaml.v3 truncates floating-point scalars when decoding into an int.
+	// Check the original scalar type so concurrency is never silently rounded.
+	var raw struct {
+		ProbeConcurrency any `yaml:"probe_concurrency"`
+	}
+	if err := node.Decode(&raw); err != nil {
+		return err
+	}
+	if raw.ProbeConcurrency != nil {
+		if _, ok := raw.ProbeConcurrency.(int); !ok {
+			return fmt.Errorf("probe_concurrency must be an integer")
+		}
+	}
+	return nil
 }
 
 func Load(path string) (Config, error) {
@@ -48,6 +73,9 @@ func Load(path string) (Config, error) {
 }
 
 func (c Config) Validate() error {
+	if c.ProbeConcurrency <= 0 {
+		return fmt.Errorf("probe_concurrency must be positive")
+	}
 	if len(c.SOCKSPassword) > 255 {
 		return fmt.Errorf("socks_password must be at most 255 bytes")
 	}

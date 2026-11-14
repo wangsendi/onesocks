@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -201,8 +202,36 @@ func TestAPIToSOCKSToSingBoxAndRefresh(t *testing.T) {
 		}
 	}
 	checkEcho("before")
+	// Authentication must pin the old runtime even when CONNECT arrives only
+	// after a refresh removes that username from the current node pool.
+	pending := authenticateOnly(t, listener.Addr().String(), node.Username)
 	body.Store("ss://" + credential + "@" + remote + "#香港改名")
 	request("POST", "/api/subscriptions/"+first.Subscription.ID+"/refresh", nil, 200)
+	packet := []byte{5, 1, 0, 1, 127, 0, 0, 1, 0, 0}
+	binary.BigEndian.PutUint16(packet[8:], uint16(target.Listener.Addr().(*net.TCPAddr).Port))
+	packet = append(packet, []byte("GET / HTTP/1.0\r\nHost: localhost\r\n\r\n")...)
+	if _, err := pending.Write(packet); err != nil {
+		t.Fatal(err)
+	}
+	var header [4]byte
+	if _, err := io.ReadFull(pending, header[:]); err != nil {
+		t.Fatal(err)
+	}
+	if header[0] != 5 || header[1] != 0 || header[2] != 0 || (header[3] != 1 && header[3] != 4) {
+		t.Fatalf("authenticated session lost its runtime after refresh: %v", header)
+	}
+	boundSize := int64(6)
+	if header[3] == 4 {
+		boundSize = 18
+	}
+	if _, err := io.CopyN(io.Discard, pending, boundSize); err != nil {
+		t.Fatal(err)
+	}
+	response, err := io.ReadAll(pending)
+	_ = pending.Close()
+	if err != nil || !bytes.Contains(response, []byte("through-sing-box")) {
+		t.Fatalf("authenticated session could not use its pinned runtime: %q, %v", response, err)
+	}
 	if err := json.Unmarshal(request("GET", "/api/nodes?subscription_id="+url.QueryEscape(first.Subscription.ID), nil, 200), &list); err != nil {
 		t.Fatal(err)
 	}
@@ -259,4 +288,28 @@ func TestAPIToSOCKSToSingBoxAndRefresh(t *testing.T) {
 	if got := restored.Nodes(""); len(got.Items) != 1 || got.Items[0].ID != remaining.Items[0].ID {
 		t.Fatalf("cache restore failed: %+v", got)
 	}
+}
+
+func authenticateOnly(t *testing.T, address, username string) net.Conn {
+	t.Helper()
+	conn, err := net.Dial("tcp", address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
+	packet := append([]byte{5, 1, 2, 1, byte(len(username))}, []byte(username)...)
+	packet = append(packet, 8)
+	packet = append(packet, []byte("anything")...)
+	if _, err := conn.Write(packet); err != nil {
+		t.Fatal(err)
+	}
+	var replies [4]byte
+	if _, err := io.ReadFull(conn, replies[:]); err != nil {
+		t.Fatal(err)
+	}
+	if replies != [4]byte{5, 2, 1, 0} {
+		t.Fatalf("SOCKS5 authentication failed: %v", replies)
+	}
+	return conn
 }

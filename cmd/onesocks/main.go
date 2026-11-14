@@ -72,18 +72,14 @@ func run() error {
 	}
 	defer apiListener.Close()
 
-	// Updates serialize and may queue behind other fetches. Bound both waiting
-	// and execution without imposing the short read timeout on a refresh response.
+	// Updates serialize and may queue behind other fetches. Streaming batches
+	// use per-probe and per-write deadlines instead of this total request limit.
 	const requestTimeout = 3 * time.Minute
 	cfg.SOCKSListen = socksListener.Addr().String()
 	cfg.APIListen = apiListener.Addr().String()
 	apiHandler := webui.New(api.New(manager, cfg))
 	httpServer := &http.Server{
-		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ctx, cancel := context.WithTimeout(r.Context(), requestTimeout)
-			defer cancel()
-			apiHandler.ServeHTTP(w, r.WithContext(ctx))
-		}),
+		Handler:           withRequestTimeout(apiHandler, requestTimeout),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      requestTimeout + 5*time.Second,
@@ -140,4 +136,16 @@ func run() error {
 		return fmt.Errorf("HTTP shutdown: %w", shutdownErr)
 	}
 	return nil
+}
+
+func withRequestTimeout(next http.Handler, timeout time.Duration) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/api/nodes/probe" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), timeout)
+		defer cancel()
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
 }

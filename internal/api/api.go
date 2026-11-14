@@ -4,11 +4,11 @@ package api
 import (
 	"context"
 	"crypto/subtle"
-	"encoding/json"
 	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"golang.org/x/sync/semaphore"
 
 	"onesocks/internal/config"
 	"onesocks/internal/domain"
@@ -26,11 +26,15 @@ type Service interface {
 }
 
 type handler struct {
-	service Service
+	service    Service
+	probeSlots *semaphore.Weighted
 }
 
 func New(service Service, cfg config.Config) http.Handler {
-	h := &handler{service: service}
+	if cfg.ProbeConcurrency <= 0 {
+		cfg.ProbeConcurrency = config.DefaultProbeConcurrency
+	}
+	h := &handler{service: service, probeSlots: semaphore.NewWeighted(int64(cfg.ProbeConcurrency))}
 	router := gin.New()
 	router.RedirectTrailingSlash = false
 	router.HandleMethodNotAllowed = true
@@ -112,75 +116,6 @@ func (h *handler) update(c *gin.Context) {
 func (h *handler) refresh(c *gin.Context) {
 	result, err := h.service.Refresh(c.Request.Context(), c.Param("id"))
 	respond(c, http.StatusOK, result, err)
-}
-
-func (h *handler) probe(kind string) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		result, err := h.service.Probe(c.Request.Context(), c.Param("id"), kind)
-		respond(c, http.StatusOK, result, err)
-	}
-}
-
-type probeResult struct {
-	ID    string            `json:"id"`
-	Node  *domain.NodeInfo  `json:"node,omitempty"`
-	Error map[string]string `json:"error,omitempty"`
-}
-
-func (h *handler) probeBatch(c *gin.Context) {
-	var input struct {
-		IDs  []string `json:"ids"`
-		Kind string   `json:"kind"`
-	}
-	if !decode(c, &input) {
-		return
-	}
-	if input.Kind != "latency" && input.Kind != "ip-check" {
-		writeError(c, http.StatusBadRequest, "invalid_input", "kind must be latency or ip-check")
-		return
-	}
-	ctx, cancel := context.WithCancel(c.Request.Context())
-	defer cancel()
-	results := make(chan probeResult)
-	for _, id := range input.IDs {
-		go func() {
-			node, err := h.service.Probe(ctx, id, input.Kind)
-			result := probeResult{ID: id}
-			if err == nil {
-				result.Node = &node
-			} else {
-				code := "internal_error"
-				var detail *domain.Error
-				switch {
-				case errors.As(err, &detail):
-					code = detail.Code
-				case errors.Is(err, context.DeadlineExceeded):
-					code = "timeout"
-				case errors.Is(err, context.Canceled):
-					code = "canceled"
-				}
-				result.Error = map[string]string{"code": code, "message": err.Error()}
-			}
-			select {
-			case results <- result:
-			case <-ctx.Done():
-			}
-		}()
-	}
-	c.Header("Content-Type", "application/x-ndjson; charset=utf-8")
-	c.Writer.Flush()
-	encoder := json.NewEncoder(c.Writer)
-	for range input.IDs {
-		select {
-		case <-ctx.Done():
-			return
-		case result := <-results:
-			if err := encoder.Encode(result); err != nil {
-				return
-			}
-			c.Writer.Flush()
-		}
-	}
 }
 
 func (h *handler) delete(c *gin.Context) {
