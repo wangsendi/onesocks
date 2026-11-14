@@ -1,0 +1,15 @@
+services:
+  onesocks:
+    image: ghcr.io/wangsendi/onesocks:${ONESOCKS_VERSION:-latest}
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - ./config.yaml:/etc/onesocks/config.yaml:ro
+      - onesocks-data:/var/lib/onesocks
+    logging:
+      options:
+        max-size: 10m
+        max-file: "3"
+
+volumes:
+  onesocks-data:

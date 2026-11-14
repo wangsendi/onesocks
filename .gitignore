@@ -37,6 +37,9 @@ go.work.sum
 /bin/
 /onesocks
 /config.yaml
+/dist/
+/output/
+/.playwright-cli/
 
 # Local development notes
 /docs/

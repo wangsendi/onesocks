@@ -1,185 +1,210 @@
 # OneSocks
 
-OneSocks 将多个代理订阅聚合为一个 SOCKS5 服务，通过用户名选择出站节点。程序使用 Go 编写，基于 [things-go/go-socks5](https://github.com/things-go/go-socks5) 提供 SOCKS5 接入，内嵌 sing-box 协议引擎、Gin 管理 API 和 Web 管理界面，使用 SQLite 保存订阅、节点及检测结果。
+**English** · [简体中文](README.zh-CN.md)
 
-## 功能
+One SOCKS5 endpoint for all your proxy subscriptions. Choose an outbound node with the SOCKS5 username.
 
-- 订阅管理：添加、编辑、删除、手动刷新和定时刷新多个订阅。
-- 节点选路：通过同一 SOCKS5 端口访问不同节点，使用节点 ID 或完整名称作为用户名。
-- 流量转发：支持 TCP 和 SOCKS5 UDP，可承载 QUIC / HTTP/3 流量。
-- 节点检测：检测 HTTP 延迟、出口 IP、国家/地区及 IP 风险评分，支持并发批量检测。
-- 节点管理：搜索、组合筛选、排序、分页，导出 CSV、SOCKS5 链接和 JSON。
-- 单文件部署：管理界面随程序编译，无需独立前端服务或数据库服务。
+OneSocks is a single Go binary with an embedded Web UI, a sing-box protocol engine, and SQLite storage. No separate frontend or database service is required.
 
-## 快速开始
+[Download](https://github.com/wangsendi/onesocks/releases/latest) · [Container image](https://github.com/wangsendi/onesocks/pkgs/container/onesocks) · [Docker setup](#docker-linux)
 
-构建需要 Go 1.25.5 或更新版本。
+![OneSocks node list with latency, exit IP, filters and pagination](.github/assets/nodes.png)
 
-在项目根目录创建 `config.yaml`：
+*Real application UI with fictional demonstration data. The Web UI currently uses Simplified Chinese.*
 
-```yaml
-socks_listen: 127.0.0.1:10801
-api_listen: 127.0.0.1:10802
-data_dir: data
-socks_password: ""
-api_token: ""
-outbound_interface: ""
+## Features
+
+- Manage multiple subscriptions with scheduled and manual refreshes.
+- Select a node by its stable ID or unique full name, using a single SOCKS5 port.
+- Forward TCP and SOCKS5 UDP, including QUIC / HTTP/3 when the client and upstream node support UDP.
+- Probe HTTP latency, exit IP, location, and IP risk, with a shared concurrency limit and streamed batch results.
+- Search, filter, sort, paginate, and export nodes as CSV, SOCKS5 links, or JSON.
+- Keep subscriptions, nodes, and probe results across restarts in SQLite.
+
+Supported imports: **sing-box JSON**, **URI lists**, and **Base64-encoded URI lists**. Supported node protocols include **Shadowsocks, VLESS, VMess, Trojan, Hysteria2, and AnyTLS**, with TLS, Reality, WebSocket, and gRPC where applicable. Clash YAML, chained outbounds, and imported listener/routing/DNS configurations are not supported.
+
+## Quick start
+
+### Download a binary
+
+Download the archive matching your OS and CPU from [Releases](https://github.com/wangsendi/onesocks/releases/latest). Linux and macOS use `.tar.gz`; Windows uses `.zip`. Both amd64 and arm64 builds are provided, with `checksums.txt` for SHA-256 verification.
+
+Extract the archive, open its directory, and run:
+
+```bash
+./onesocks -config config.yaml
+# Windows PowerShell: .\onesocks.exe -config config.yaml
 ```
 
-构建并启动：
+Open **<http://127.0.0.1:8080>**, add a subscription, then click **连接** (Connect) on a node to copy its SOCKS5 link or curl command. The bundled config listens on `127.0.0.1:1080` for SOCKS5 and `127.0.0.1:8080` for the UI/API.
+
+### Docker (Linux)
+
+Images: `ghcr.io/wangsendi/onesocks:latest` or a pinned tag such as `:v0.1.0`, for **linux/amd64** and **linux/arm64**.
+
+```bash
+mkdir onesocks && cd onesocks
+curl -fsSLO https://raw.githubusercontent.com/wangsendi/onesocks/main/compose.yaml
+curl -fsSL https://raw.githubusercontent.com/wangsendi/onesocks/main/configs/config.docker.yaml -o config.yaml
+# Edit config.yaml if needed, then start:
+docker compose up -d
+docker compose logs -f
+```
+
+Open **<http://127.0.0.1:8080>** on the Docker host. The default config only permits local access. For remote access, change the listener addresses to an appropriate host IP or `0.0.0.0`, set `socks_password` and `api_token`, and restrict access with your firewall. The UI/API exposes subscription URLs and node credentials.
+
+The Compose file uses **host networking**. SOCKS5 UDP allocates a different temporary relay port for each session; publishing only `1080/tcp`, `1080/udp`, and `8080/tcp` on a bridge network does **not** expose those relay ports. Remote clients must be able to reach the returned host address and UDP port. These instructions target Docker Engine on Linux; Docker Desktop networking does not provide the same guarantees. Native binaries are the recommended starting point on macOS and Windows.
+
+The named volume `onesocks-data` stores the database in `/var/lib/onesocks`. Keep this `data_dir` when using the supplied mounts. Restart after editing the config; `docker compose down` preserves the volume, while `down -v` deletes it.
+
+Without Compose, after downloading `config.yaml` as above:
+
+```bash
+docker run -d --name onesocks --restart unless-stopped \
+  --network host \
+  --mount type=bind,src="$(pwd)/config.yaml",dst=/etc/onesocks/config.yaml,readonly \
+  --mount type=volume,src=onesocks-data,dst=/var/lib/onesocks \
+  ghcr.io/wangsendi/onesocks:latest
+```
+
+Upgrade with `docker compose pull && docker compose up -d`. Set `ONESOCKS_VERSION=v0.1.0` in a `.env` file next to `compose.yaml` to pin a version. The container runs as UID/GID `65532`; if you replace the named volume with a bind mount, make that directory writable by this user.
+
+### Build from source
+
+Use **Go 1.27 or later** (the release toolchain), and run from the repository root:
 
 ```bash
 make build
-./bin/onesocks -config config.yaml
+./bin/onesocks
 ```
 
-也可以直接运行源码：
+Without `-config`, program defaults are used: SOCKS5 on `127.0.0.1:1080`, UI/API on `127.0.0.1:8080`, and data in `./data`. To customize settings, create `config.yaml` using the example below and pass `-config config.yaml`.
 
 ```bash
-go run -tags with_utls ./cmd/onesocks -config config.yaml
+# Build a local container image instead:
+docker build --build-arg VERSION=dev -t onesocks:local .
 ```
 
-启动后访问 <http://127.0.0.1:10802/>，在管理界面添加订阅。以下示例均使用上述端口。
+## Connect through a node
 
-### 添加订阅
+The Web UI provides connection details and copyable commands:
+
+![OneSocks connection drawer with SOCKS5 username and curl command](.github/assets/connection.png)
+
+*All addresses, nodes, and credentials shown here are demonstration data.*
+
+For API-based setup, add a subscription and list its nodes:
 
 ```bash
-curl -X POST http://127.0.0.1:10802/api/subscriptions \
+curl -X POST http://127.0.0.1:8080/api/subscriptions \
   -H 'Content-Type: application/json' \
-  -d '{"name":"机场A","url":"https://example.com/subscription","refresh_interval":"6h"}'
+  -d '{"name":"My subscription","url":"https://example.com/subscription","refresh_interval":"6h"}'
+
+curl http://127.0.0.1:8080/api/nodes
 ```
 
-`refresh_interval` 可省略，默认每 6 小时刷新。订阅 URL 中的 `#` 片段标签会在保存和请求前移除。
-
-### 使用代理
-
-获取节点列表：
+Replace `NODE_USERNAME` with `items[].username` from that response:
 
 ```bash
-curl http://127.0.0.1:10802/api/nodes
-```
-
-将 `NODE_USERNAME` 替换为响应中 `items[].username` 的值：
-
-```bash
-curl --proxy socks5h://127.0.0.1:10801 \
+curl --proxy socks5h://127.0.0.1:1080 \
   --proxy-user 'NODE_USERNAME:anything' \
-  --max-time 30 \
-  https://ipinfo.io/json
+  --max-time 30 https://ipinfo.io/json
 ```
 
-未设置 `socks_password` 时，密码可为任意非空字符串；设置后需使用配置中的密码。管理界面可直接复制 SOCKS5 链接和 curl 命令。
+SOCKS5 username/password authentication is required. If `socks_password` is empty, any **nonempty** password is accepted; otherwise use the configured password. No-auth SOCKS5 clients cannot select a node.
 
-用户名与节点 ID 相同，格式为 `n_` 加 `MD5(subscription_id + "\x00" + 原节点名)`。订阅改名或节点配置更新不会改变 ID；原节点改名会生成新的 ID。同一订阅中名称相同的节点保留最后一条。
+A node ID is `n_` followed by `MD5(subscription_id + "\x00" + original_node_name)`. Renaming the subscription or updating node settings preserves the ID; renaming the original node changes it. Duplicate original names within one subscription keep the last entry. A unique full display name, such as `My subscription-Tokyo 01`, also works as a username if it fits within 255 bytes.
 
-完整展示名称（如 `机场A-香港01`）也可作为用户名，但需唯一且不超过 255 字节。
+## Configuration
 
-## 配置
+```yaml
+socks_listen: 127.0.0.1:1080
+api_listen: 127.0.0.1:8080
+data_dir: data
+socks_password: ""
+api_token: ""
+probe_concurrency: 16
+outbound_interface: ""
+```
 
-通过 `-config` 指定 YAML 配置文件。省略该参数时使用下表默认值；相对路径以程序工作目录为基准。
-
-| 配置项 | 默认值 | 说明 |
+| Setting | Default | Meaning |
 | --- | --- | --- |
-| `socks_listen` | `127.0.0.1:1080` | SOCKS5 监听地址 |
-| `api_listen` | `127.0.0.1:8080` | 管理界面及 API 监听地址 |
-| `data_dir` | `data` | SQLite 数据目录 |
-| `socks_password` | 空 | 所有节点共用的 SOCKS5 密码；留空接受任意非空密码 |
-| `api_token` | 空 | API Bearer 令牌；留空关闭 API 鉴权 |
-| `outbound_interface` | 空 | 出站网卡；留空使用系统路由 |
-| `probe_concurrency` | `16` | 节点检测总并发上限，必须为正整数；单节点与所有批量请求共享 |
+| `socks_listen` | `127.0.0.1:1080` | SOCKS5 listening address |
+| `api_listen` | `127.0.0.1:8080` | Web UI and API listening address |
+| `data_dir` | `data` | Directory containing `onesocks.db` |
+| `socks_password` | empty | Shared SOCKS5 password; empty accepts any nonempty password |
+| `api_token` | empty | API Bearer token; empty disables API authentication |
+| `probe_concurrency` | `16` | Positive integer; shared limit across individual and batch probes |
+| `outbound_interface` | empty | Bind outbound connections to an interface; empty uses system routing |
 
-设置 `api_token` 后，管理界面需要输入令牌，API 请求需要携带认证头：
+Relative paths are resolved from the working directory. Config changes require a restart. With `api_token` set, sign in to the Web UI with the token and add this header to API calls:
 
 ```bash
-curl -H 'Authorization: Bearer YOUR_TOKEN' \
-  http://127.0.0.1:10802/api/nodes
+curl -H 'Authorization: Bearer YOUR_TOKEN' http://127.0.0.1:8080/api/nodes
 ```
 
-管理界面和 API 返回完整订阅 URL、节点配置及服务配置，不进行脱敏。
+The UI and API return full subscription URLs, outbound configurations, and service settings, including credentials. Use authenticated, restricted access when exposing the service beyond localhost.
 
-### 出站网卡
+`outbound_interface` applies to node connections, node DNS lookups, and subscription downloads. When running beside a TUN client, choose your physical interface, such as `eth0`, if needed. Interface binding depends on OS permissions and routing; a DNS server returning Fake-IP addresses may also require DNS exclusions or changes.
 
-与 Mihomo 等 TUN 客户端共存时，可将 `outbound_interface` 设置为实际物理网卡，例如 `eth0`。此配置用于绑定节点连接、节点域名解析和订阅下载的出站接口，修改后需重启程序。
+## Probes and exports
 
-接口绑定取决于系统权限和路由配置。若系统 DNS 指向 TUN 客户端的 Fake-IP 服务，还需调整 DNS 或为节点域名配置排除规则。
+**HTTP latency** sends HEAD requests through the selected node to Cloudflare, preferring the second request over a reused connection. **IP checks** query [iplogs](https://iplogs.com/) through the node for exit IP, location, network details, and risk evidence. Risk scores range from 0 to 1; higher values indicate stronger evidence of proxy use.
 
-## 管理界面
+These are diagnostic checks, **not upload/download speed tests**. They use TCP and do not establish UDP availability.
 
-节点列表按节点、出口 IP / 地区、延迟、风险评分和操作分列，小屏幕下显示为紧凑列表。支持按订阅、协议、国家/地区、检测状态、延迟上限和评分上限组合筛选，并按名称、延迟或评分排序。可搜索节点名称、用户名、IP 和地区；每页显示 10、20、50 或 100 条，支持点击页码，超过 5 页时可输入页码跳转。
-
-导出和批量检测作用于筛选后的全部节点，包含其他分页中的结果。导出支持 CSV 表格、SOCKS5 链接 TXT 和完整 JSON；链接使用连接设置中的地址和密码。点击“连接”打开连接配置，点击“详情”查看检测结果，关闭后焦点回到原按钮；列表不保留选中状态。
-
-### 节点检测
-
-- **HTTP 延迟**：通过所选节点向 Cloudflare 发送 HEAD 请求，优先记录复用连接后的第二次响应耗时；无法复用时记录首次请求的完整耗时。
-- **IP 检测**：通过所选节点向 [iplogs](https://iplogs.com/) 发送请求，由其识别出口 IP，返回位置、网络归属和风险信息。`score` 范围为 0–1，数值越高表示风险证据越强。
-
-检测结果自动保存至 SQLite，重启后恢复。节点出站配置发生变化时清除旧结果。节点检测默认最多同时运行 16 项，单节点与多个批量请求共享 `probe_concurrency` 额度，超出部分排队。每完成一项就显示结果，单项失败不影响其他节点。
+Batch probes and exports apply to **all filtered nodes**, including other pages. The shared concurrency limit defaults to 16; excess work waits in a cancellable queue. Results arrive as each node finishes, and a failed node does not stop the rest. Closing the batch request cancels its running and queued work. Results are saved to SQLite and cleared when a node's outbound configuration changes.
 
 ## HTTP API
 
-请求和响应使用 JSON，批量检测响应使用 NDJSON。订阅和节点列表通过 `items` 字段返回。
+Requests and responses use JSON; list responses contain `items`. Batch probes return NDJSON.
 
-| 方法 | 路径 | 说明 |
+| Method | Path | Purpose |
 | --- | --- | --- |
-| GET | `/api/subscriptions` | 获取订阅列表及刷新状态 |
-| POST | `/api/subscriptions` | 添加并立即拉取订阅 |
-| PATCH | `/api/subscriptions/{id}` | 修改 `name`、`url` 或 `refresh_interval` |
-| POST | `/api/subscriptions/{id}/refresh` | 刷新订阅 |
-| DELETE | `/api/subscriptions/{id}` | 删除订阅及其节点 |
-| GET | `/api/nodes` | 获取节点列表，可通过 `subscription_id` 查询参数筛选 |
-| POST | `/api/nodes/{id}/latency` | 检测单个节点的 HTTP 延迟 |
-| POST | `/api/nodes/{id}/ip-check` | 检测单个节点的出口 IP |
-| POST | `/api/nodes/probe` | 并发批量检测节点 |
-| GET | `/api/status` | 获取版本、运行状态及订阅和节点数量 |
-| GET | `/api/config` | 获取当前服务配置 |
-
-批量检测示例，将 `NODE_ID` 替换为实际节点 ID，`kind` 可选 `latency` 或 `ip-check`：
+| GET | `/api/subscriptions` | List subscriptions and refresh status |
+| POST | `/api/subscriptions` | Add and immediately fetch a subscription |
+| PATCH | `/api/subscriptions/{id}` | Update name, URL, or refresh interval |
+| POST | `/api/subscriptions/{id}/refresh` | Refresh a subscription |
+| DELETE | `/api/subscriptions/{id}` | Delete a subscription and its nodes |
+| GET | `/api/nodes` | List nodes; optional `subscription_id` filter |
+| POST | `/api/nodes/{id}/latency` | Probe HTTP latency |
+| POST | `/api/nodes/{id}/ip-check` | Probe exit IP and risk |
+| POST | `/api/nodes/probe` | Stream batch probe results |
+| GET | `/api/status` | Version, readiness, uptime, and counts |
+| GET | `/api/config` | Current service configuration |
 
 ```bash
-curl -N -X POST http://127.0.0.1:10802/api/nodes/probe \
+curl -N -X POST http://127.0.0.1:8080/api/nodes/probe \
   -H 'Content-Type: application/json' \
   -d '{"ids":["NODE_ID"],"kind":"latency"}'
 ```
 
-响应按完成顺序逐行包含 `id` 及 `node` 或 `error`。单个节点的检测失败原因保存在 `node.latency.error` 或 `node.ip_check.error` 中。关闭批量请求或停止检测会取消正在运行的任务，并丢弃尚未开始的队列；未开始的节点不会更新检测结果。
+`kind` is `latency` or `ip-check`. Each line contains `id` and either `node` or `error`; probe failures can also appear in `node.latency.error` or `node.ip_check.error`. Latency probes have a 5-second limit, IP probes 40 seconds, and each stream write 30 seconds. Batch streams are exempt from the normal 3-minute API deadline.
 
-批量流式请求不受普通 API 的 3 分钟总时限限制；每项延迟检测最多 5 秒、IP 检测最多 40 秒，每次响应写入最多等待 30 秒。修改并发配置后需要重启服务。
+Subscriptions refresh every 6 hours unless configured otherwise. URL fragments are removed before storage and fetching. Failed refreshes preserve the last successful nodes. On startup, saved nodes are restored before subscriptions refresh in the background.
 
-## 数据存储
+## TCP, UDP, and QUIC
 
-数据库位于 `data_dir/onesocks.db`，默认路径为 `data/onesocks.db`。程序启动时恢复已保存的节点，并在后台刷新订阅；刷新失败时保留上次成功的节点。
+TCP CONNECT and UDP ASSOCIATE run in the **same process**; SOCKS5 BIND is not supported. For UDP, the client authenticates over TCP, keeps that control connection open, and sends SOCKS5-encapsulated datagrams to the returned UDP relay address. UDP payloads do not travel over that TCP control connection. The transport to the upstream proxy depends on its protocol; for example, AnyTLS encapsulates UDP over its own stream transport.
 
-| 表 | 内容 |
-| --- | --- |
-| `subscriptions` | 订阅名称、URL、刷新间隔及最近刷新状态 |
-| `nodes` | 节点名称、所属订阅、sing-box 出站配置及延迟和 IP 检测结果 |
-| `app_state` | 当前节点池版本 |
+QUIC / HTTP/3 requires UDP support in **both the client and the selected node**. A TCP-only SOCKS5 client does not gain UDP support automatically. Each association uses an ephemeral UDP port, which must be reachable by the client, including through any container networking, NAT, or firewall.
 
-节点使用 `(subscription_id, name)` 唯一约束，删除订阅时级联删除节点。完整表结构见 [schema.sql](internal/store/schema.sql)。`data/`、本地 `config.yaml` 和构建产物均已加入 Git 忽略规则。
+UDP associations and destination connections expire after 2 minutes of inactivity. Each association allows up to 128 destinations, with 8 queued packets per destination. Packets beyond these limits and SOCKS5 fragments are dropped.
 
-## 支持范围
-
-订阅支持 sing-box JSON、节点 URI 列表及 Base64 编码的 URI 列表。支持的协议包括 Shadowsocks、VLESS、Trojan、VMess、Hysteria2 和 AnyTLS，以及常用的 TLS、Reality、WebSocket 和 gRPC 配置。
-
-仅导入独立代理出站，不导入订阅的监听、路由或完整 DNS 配置，不支持 Clash YAML 和链式出站。本地 SOCKS5 支持 TCP CONNECT 和 UDP ASSOCIATE，不支持 BIND。
-
-UDP 与 TCP 由同一个 OneSocks 进程处理。客户端先通过 TCP 认证并协商 UDP 会话，再向返回的 UDP 地址发送带有 SOCKS5 目标地址头的数据包。TCP 控制连接只维持会话，UDP 数据不经过这条 TCP 连接转发。当前每个会话分配一个临时 UDP 中继端口；远程、容器或 NAT 部署时，需要保证返回的地址和 UDP 端口可从客户端访问。
-
-客户端和所选节点均需支持 UDP，才能转发 QUIC / HTTP/3；仅支持 SOCKS5 TCP 的客户端不会自动获得此能力。发往订阅节点的外层封装由节点协议决定。现有 HTTP 延迟及 IP 检测仍使用 TCP，不能据此判断节点的 UDP 可用性。
-
-UDP 会话在 TCP 控制连接关闭或空闲 2 分钟后清理，每个目标的空闲连接也会独立回收。每个会话最多保留 128 个目标，每个目标最多排队 8 个数据包；超出限制的包及 SOCKS5 分片包会被丢弃。
-
-## 构建与测试
+## Development and releases
 
 ```bash
-make build   # 构建 bin/onesocks
-make test    # 运行测试
-make race    # 运行竞态检测
+make test
+make race
+go vet -tags with_utls ./...
+make build VERSION=v0.1.0
+bash scripts/package.sh v0.1.0 linux amd64
 ```
 
-默认构建标签为 `with_utls`，用于支持 uTLS 和 Reality。静态资源通过 `go:embed` 内嵌，修改管理界面后需重新构建并重启程序。
+Builds use `with_utls` for uTLS and Reality. UI assets are embedded using `go:embed`; rebuild and restart after changing them.
 
-## 许可证
+Pushing a `v*` version tag runs the [release workflow](https://github.com/wangsendi/onesocks/blob/main/.github/workflows/release.yml): tests, six platform archives, SHA-256 checksums, multi-architecture GHCR images, and a GitHub Release. Publishing uses the repository's automatic `GITHUB_TOKEN` with `contents: write` and `packages: write`; no separate registry secret is needed. For a newly created GHCR package, the repository owner may need to set its visibility to **Public** in package settings to allow anonymous pulls.
 
-见 [LICENSE](LICENSE)。
+## License
+
+See [LICENSE](LICENSE). The proxy engine is [sing-box](https://github.com/SagerNet/sing-box); dependency licenses also apply when distributing builds.

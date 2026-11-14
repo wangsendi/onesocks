@@ -1,0 +1,9 @@
+# Linux host networking: listeners are local to the host by default.
+# For remote clients, change the bind addresses and set both credentials.
+socks_listen: 127.0.0.1:1080
+api_listen: 127.0.0.1:8080
+data_dir: /var/lib/onesocks
+socks_password: ""
+api_token: ""
+probe_concurrency: 16
+outbound_interface: ""
