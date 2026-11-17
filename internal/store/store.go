@@ -30,6 +30,7 @@ type Subscription struct {
 	LastAttemptAt   *time.Time
 	LastSuccessAt   *time.Time
 	LastError       string
+	Traffic         *domain.SubscriptionTraffic
 }
 
 type State struct {
@@ -90,9 +91,9 @@ func (s *Store) initialize() error {
 		return err
 	}
 	switch version {
-	case 3:
+	case 4:
 		return nil
-	case 0, 2:
+	case 0, 2, 3:
 	default:
 		return fmt.Errorf("unsupported database schema version: %d", version)
 	}
@@ -102,10 +103,14 @@ func (s *Store) initialize() error {
 	}
 	defer tx.Rollback()
 	statement := schema
-	if version == 2 {
-		statement = `ALTER TABLE nodes ADD COLUMN latency_json TEXT;
-			ALTER TABLE nodes ADD COLUMN ip_check_json TEXT;
-			PRAGMA user_version = 3;`
+	if version != 0 {
+		statement = ""
+		if version == 2 {
+			statement = `ALTER TABLE nodes ADD COLUMN latency_json TEXT;
+				ALTER TABLE nodes ADD COLUMN ip_check_json TEXT;`
+		}
+		statement += `ALTER TABLE subscriptions ADD COLUMN traffic_json TEXT;
+			PRAGMA user_version = 4;`
 	}
 	if _, err := tx.Exec(statement); err != nil {
 		return err
@@ -124,7 +129,7 @@ func (s *Store) Load(ctx context.Context) (State, error) {
 		return state, err
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT s.id, s.name, s.url, s.refresh_interval,
-		s.last_attempt_at, s.last_success_at, s.last_error, n.name, n.outbound_json
+		s.last_attempt_at, s.last_success_at, s.last_error, s.traffic_json, n.name, n.outbound_json
 		FROM subscriptions s LEFT JOIN nodes n ON n.subscription_id = s.id
 		ORDER BY s.rowid, n.name`)
 	if err != nil {
@@ -133,9 +138,9 @@ func (s *Store) Load(ctx context.Context) (State, error) {
 	defer rows.Close()
 	for rows.Next() {
 		var sub Subscription
-		var attempt, success, nodeName sql.NullString
+		var attempt, success, traffic, nodeName sql.NullString
 		var outbound []byte
-		if err := rows.Scan(&sub.ID, &sub.Name, &sub.URL, &sub.RefreshInterval, &attempt, &success, &sub.LastError, &nodeName, &outbound); err != nil {
+		if err := rows.Scan(&sub.ID, &sub.Name, &sub.URL, &sub.RefreshInterval, &attempt, &success, &sub.LastError, &traffic, &nodeName, &outbound); err != nil {
 			return state, err
 		}
 		if len(state.Subscriptions) == 0 || state.Subscriptions[len(state.Subscriptions)-1].ID != sub.ID {
@@ -144,6 +149,11 @@ func (s *Store) Load(ctx context.Context) (State, error) {
 			}
 			if sub.LastSuccessAt, err = parseTime(success); err != nil {
 				return state, err
+			}
+			if traffic.Valid {
+				if err := json.Unmarshal([]byte(traffic.String), &sub.Traffic); err != nil {
+					return state, fmt.Errorf("decode traffic for subscription %s: %w", sub.ID, err)
+				}
 			}
 			state.Subscriptions = append(state.Subscriptions, sub)
 		}
@@ -159,14 +169,23 @@ func (s *Store) Load(ctx context.Context) (State, error) {
 }
 
 func (s *Store) Put(ctx context.Context, generation uint64, sub Subscription) error {
+	var traffic any
+	if sub.Traffic != nil {
+		data, err := json.Marshal(sub.Traffic)
+		if err != nil {
+			return err
+		}
+		traffic = string(data)
+	}
 	return s.write(ctx, generation, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, `INSERT INTO subscriptions
-			(id, name, url, refresh_interval, last_attempt_at, last_success_at, last_error)
-			VALUES (?, ?, ?, ?, ?, ?, ?)
+			(id, name, url, refresh_interval, last_attempt_at, last_success_at, last_error, traffic_json)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(id) DO UPDATE SET name = excluded.name, url = excluded.url,
 			refresh_interval = excluded.refresh_interval, last_attempt_at = excluded.last_attempt_at,
-			last_success_at = excluded.last_success_at, last_error = excluded.last_error`,
-			sub.ID, sub.Name, sub.URL, sub.RefreshInterval, formatTime(sub.LastAttemptAt), formatTime(sub.LastSuccessAt), sub.LastError)
+			last_success_at = excluded.last_success_at, last_error = excluded.last_error,
+			traffic_json = excluded.traffic_json`,
+			sub.ID, sub.Name, sub.URL, sub.RefreshInterval, formatTime(sub.LastAttemptAt), formatTime(sub.LastSuccessAt), sub.LastError, traffic)
 		if err != nil {
 			return err
 		}

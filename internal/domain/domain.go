@@ -96,15 +96,41 @@ type NodeList struct {
 }
 
 type SubscriptionInfo struct {
-	ID              string     `json:"id"`
-	Name            string     `json:"name"`
-	URL             string     `json:"url"`
-	RefreshInterval string     `json:"refresh_interval"`
-	LastAttemptAt   *time.Time `json:"last_attempt_at,omitempty"`
-	LastSuccessAt   *time.Time `json:"last_success_at,omitempty"`
-	LastError       string     `json:"last_error,omitempty"`
-	NodeCount       int        `json:"node_count"`
-	Stale           bool       `json:"stale"`
+	ID              string               `json:"id"`
+	Name            string               `json:"name"`
+	URL             string               `json:"url"`
+	RefreshInterval string               `json:"refresh_interval"`
+	LastAttemptAt   *time.Time           `json:"last_attempt_at,omitempty"`
+	LastSuccessAt   *time.Time           `json:"last_success_at,omitempty"`
+	LastError       string               `json:"last_error,omitempty"`
+	NodeCount       int                  `json:"node_count"`
+	Stale           bool                 `json:"stale"`
+	Traffic         *SubscriptionTraffic `json:"traffic,omitempty"`
+}
+
+type SubscriptionTraffic struct {
+	UploadBytes   *uint64    `json:"upload_bytes,omitempty"`
+	DownloadBytes *uint64    `json:"download_bytes,omitempty"`
+	TotalBytes    *uint64    `json:"total_bytes,omitempty"`
+	ExpiresAt     *time.Time `json:"expires_at,omitempty"`
+}
+
+func (t *SubscriptionTraffic) Clone() *SubscriptionTraffic {
+	if t == nil {
+		return nil
+	}
+	copy := *t
+	for _, field := range []**uint64{&copy.UploadBytes, &copy.DownloadBytes, &copy.TotalBytes} {
+		if *field != nil {
+			value := **field
+			*field = &value
+		}
+	}
+	if t.ExpiresAt != nil {
+		value := *t.ExpiresAt
+		copy.ExpiresAt = &value
+	}
+	return &copy
 }
 
 type SubscriptionInput struct {

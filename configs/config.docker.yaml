@@ -7,3 +7,4 @@ socks_password: ""
 api_token: ""
 probe_concurrency: 16
 outbound_interface: ""
+node_ip_preference: auto

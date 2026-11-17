@@ -18,7 +18,8 @@ import (
 
 var supported = map[string]bool{"shadowsocks": true, "vless": true, "trojan": true, "vmess": true, "hysteria2": true, "anytls": true}
 
-// Parse accepts URI lists, sing-box JSON and Clash YAML, optionally base64 encoded.
+// Parse accepts URI lists, sing-box/V2Ray JSON, Clash YAML and Surge profiles,
+// optionally base64 encoded.
 // Diagnostics deliberately never include URI credentials or source documents.
 func Parse(data []byte) (domain.ParseResult, error) {
 	var result domain.ParseResult
@@ -36,10 +37,13 @@ func Parse(data []byte) (domain.ParseResult, error) {
 	first := true
 	for i, line := range lines {
 		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") || strings.HasPrefix(line, "//") {
 			continue
 		}
 		if first && !hasURIScheme(line) {
+			if isSurge(line) {
+				return parseSurge(data)
+			}
 			return parseClash(data)
 		}
 		first = false

@@ -68,6 +68,7 @@ type Options struct {
 	// OutboundInterface pins proxy connections and bootstrap DNS to this
 	// interface through sing-box's native socket binding. Empty uses defaults.
 	OutboundInterface string
+	NodeIPPreference  string
 }
 
 func New(ctx context.Context, nodes []engine.Node) (engine.Engine, error) {
@@ -75,6 +76,14 @@ func New(ctx context.Context, nodes []engine.Node) (engine.Engine, error) {
 }
 
 func NewWithOptions(ctx context.Context, nodes []engine.Node, opts Options) (engine.Engine, error) {
+	var domainResolver any = "bootstrap"
+	switch opts.NodeIPPreference {
+	case "", "auto":
+	case "ipv4", "ipv6":
+		domainResolver = map[string]any{"server": "bootstrap", "strategy": "prefer_" + opts.NodeIPPreference}
+	default:
+		return nil, fmt.Errorf("node IP preference must be auto, ipv4 or ipv6")
+	}
 	if opts.OutboundInterface != "" {
 		if _, err := net.InterfaceByName(opts.OutboundInterface); err != nil {
 			return nil, fmt.Errorf("outbound interface %q: %w", opts.OutboundInterface, err)
@@ -99,6 +108,11 @@ func NewWithOptions(ctx context.Context, nodes []engine.Node, opts Options) (eng
 		halfClose[node.ID] = rawTCP && plugin == "" && (len(transport) == 0 || string(transport) == "null")
 		tag, _ := json.Marshal(node.ID)
 		fields["tag"] = tag
+		if opts.NodeIPPreference == "ipv4" || opts.NodeIPPreference == "ipv6" {
+			value, _ := json.Marshal(domainResolver)
+			fields["domain_resolver"] = value
+			delete(fields, "domain_strategy")
+		}
 		if opts.OutboundInterface != "" {
 			value, _ := json.Marshal(opts.OutboundInterface)
 			fields["bind_interface"] = value
@@ -112,7 +126,7 @@ func NewWithOptions(ctx context.Context, nodes []engine.Node, opts Options) (eng
 	// Bootstrap DNS is explicit; final destinations remain domain addresses and
 	// are passed to the selected proxy protocol rather than resolved by OneSocks.
 	bootstrap := map[string]any{"type": "local", "tag": "bootstrap"}
-	route := map[string]any{"default_domain_resolver": "bootstrap"}
+	route := map[string]any{"default_domain_resolver": domainResolver}
 	if opts.OutboundInterface != "" {
 		bootstrap["bind_interface"] = opts.OutboundInterface
 		bootstrap["prefer_go"] = true

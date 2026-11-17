@@ -364,7 +364,7 @@ function renderNodes(updateDetails = true) {
   $("export-toggle").textContent = `导出（${nodes.length}）`;
   if (!nodes.length) setExportOpen(false);
   if (updateDetails) renderConnection();
-  renderProbeControls(nodes.length > 0);
+  renderProbeControls(nodes);
 }
 
 function createNodeRow(id) {
@@ -490,7 +490,7 @@ function openNode(id, page, trigger) {
   detailPage = page;
   detailTrigger = trigger;
   renderConnection();
-  renderProbeControls(filteredNodes().length > 0);
+  renderProbeControls(filteredNodes());
   if (!$("connection-dialog").open) $("connection-dialog").showModal();
   const invalid = $("connection-panel").querySelector('[aria-invalid="true"]');
   (page === "diagnostics" ? $("diagnostics-tab") : invalid || $("connection-copy")).focus({ preventScroll: true });
@@ -572,14 +572,17 @@ async function copyInput(input, label) {
   formError("copy-hint", copied ? label + "已复制。" : "复制失败");
 }
 
-function renderProbeControls(hasNodes) {
+function renderProbeControls(nodes) {
   for (const [kind, prefix, label] of [["latency", "latency", "延迟探测"], ["ip-check", "ip", "IP 检测"]]) {
     const status = probeStatus(state.detailID, kind);
     $(prefix + "-test").disabled = !!status;
     $(prefix + "-test").textContent = status || label;
-    $(prefix + "-all").disabled = !!batch || probes.size > 0 || !hasNodes;
-    $(prefix + "-all").textContent = batch?.kind === kind ? "检测中…" : kind === "latency" ? "批量延迟探测" : "批量 IP 检测";
+    $(prefix + "-all").disabled = !!batch || probes.size > 0 || !nodes.length;
+    $(prefix + "-all").textContent = batch?.kind === kind && !batch.incompleteOnly ? "检测中…" : kind === "latency" ? "批量延迟探测" : "批量 IP 检测";
   }
+  const missing = nodes.filter((node) => probeState(node.ip_check) !== "success").length;
+  $("ip-missing").disabled = !!batch || probes.size > 0 || missing === 0;
+  $("ip-missing").textContent = batch?.incompleteOnly ? "补测中…" : `补测 IP（${missing}）`;
   $("probe-stop").hidden = !batch;
 }
 
@@ -622,13 +625,14 @@ async function probeNode(id, kind) {
   }
 }
 
-async function probeFiltered(kind) {
+async function probeFiltered(kind, incompleteOnly = false) {
   if (batch || probes.size) return;
-  const ids = filteredNodes().map((node) => node.id);
+  const field = kind === "latency" ? "latency" : "ip_check";
+  const ids = filteredNodes().filter((node) => !incompleteOnly || probeState(node[field]) !== "success").map((node) => node.id);
   if (!ids.length) return;
   const currentSession = session;
   const controller = new AbortController();
-  const job = { kind, done: 0, failed: 0, stopped: false };
+  const job = { kind, incompleteOnly, done: 0, failed: 0, stopped: false };
   batch = job;
   for (const id of ids) probes.set(id + ":" + kind, controller);
   $("probe-progress").textContent = `正在检测 0 / ${ids.length}`;
@@ -746,6 +750,37 @@ function dateTime(value) {
   return new Date(value).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
+function formatBytes(value) {
+  const units = ["B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB"];
+  const index = value > 0 ? Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1) : 0;
+  return new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 2 }).format(value / 1024 ** index) + "\u00a0" + units[index];
+}
+
+function subscriptionTrafficCell(subscription) {
+  const cell = element("td", "subscription-traffic");
+  const traffic = subscription.traffic;
+  if (!traffic) {
+    cell.append(element("span", "muted", "流量未提供"));
+    return cell;
+  }
+  const used = traffic.upload_bytes != null && traffic.download_bytes != null ? traffic.upload_bytes + traffic.download_bytes : null;
+  const total = traffic.total_bytes > 0 ? traffic.total_bytes : null;
+  const remaining = used != null && total != null ? Math.max(0, total - used) : null;
+  cell.append(element("div", "cell-title", remaining != null ? "剩余 " + formatBytes(remaining) : used != null ? "已用 " + formatBytes(used) : "用量未提供"));
+  const detail = [used != null && remaining != null ? "已用 " + formatBytes(used) : "", total != null ? "总计 " + formatBytes(total) : "总额未提供"].filter(Boolean).join(" / ");
+  cell.append(element("span", "cell-detail", detail));
+  const expiry = traffic.expires_at ? new Date(traffic.expires_at) : null;
+  const expires = element("span", "cell-detail", expiry ? (expiry <= new Date() ? "已到期 · " : "到期 ") + expiry.toLocaleString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "到期时间未提供");
+  expires.classList.toggle("metric-error", !!expiry && expiry <= new Date());
+  cell.append(expires);
+  cell.title = [
+    "服务商统计，更新于 " + dateTime(subscription.last_success_at),
+    traffic.upload_bytes != null ? "上传 " + formatBytes(traffic.upload_bytes) : "上传量未提供",
+    traffic.download_bytes != null ? "下载 " + formatBytes(traffic.download_bytes) : "下载量未提供",
+  ].join("\n");
+  return cell;
+}
+
 function renderSubscriptions() {
   const rows = document.createDocumentFragment();
   for (const subscription of state.subscriptions) {
@@ -763,7 +798,7 @@ function renderSubscriptions() {
     const buttons = element("div", "row-actions");
     buttons.append(action("刷新", (event) => refreshSubscription(subscription, event.currentTarget), "", true), action("编辑", () => openSubscription(subscription), "", true), action("删除", () => openDelete(subscription), "delete-action", true));
     controls.append(buttons);
-    row.append(name, count, sync, controls);
+    row.append(name, count, subscriptionTrafficCell(subscription), sync, controls);
     rows.append(row);
   }
   $("subscriptions-body").replaceChildren(rows);
@@ -972,6 +1007,7 @@ $("latency-test").addEventListener("click", () => probeNode(state.detailID, "lat
 $("ip-test").addEventListener("click", () => probeNode(state.detailID, "ip-check"));
 $("latency-all").addEventListener("click", () => probeFiltered("latency"));
 $("ip-all").addEventListener("click", () => probeFiltered("ip-check"));
+$("ip-missing").addEventListener("click", () => probeFiltered("ip-check", true));
 $("probe-stop").addEventListener("click", stopProbes);
 $("logout-button").addEventListener("click", () => showLogin());
 $("boot-retry").addEventListener("click", start);

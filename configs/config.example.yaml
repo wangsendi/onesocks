@@ -16,4 +16,7 @@ probe_concurrency: 16
 # Empty follows system routing; set e.g. eth0 to bypass a local TUN route.
 outbound_interface: eth0
 
+# Proxy server address preference: auto, ipv4 or ipv6. The other family remains a fallback.
+node_ip_preference: auto
+
 # Add subscriptions through POST /api/subscriptions.

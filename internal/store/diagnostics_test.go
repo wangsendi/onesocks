@@ -178,3 +178,34 @@ func assertDiagnostics(t *testing.T, s *Store, want map[string]Diagnostics) {
 		t.Fatalf("diagnostics=%+v, want=%+v, error=%v", got, want, err)
 	}
 }
+
+func TestSQLiteVersionThreeUpgradePreservesDiagnostics(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), Filename)
+	s := openTestStore(t, path)
+	sub := testSubscription("s_existing", "Existing")
+	if err := s.Put(ctx, 7, sub); err != nil {
+		t.Fatal(err)
+	}
+	id := domain.NodeID(sub.ID, sub.Nodes[0].Name)
+	if updated, err := s.RecordProbe(ctx, id, sub.Nodes[0].Outbound, testDiagnostics()); err != nil || !updated {
+		t.Fatal(updated, err)
+	}
+	if _, err := s.db.Exec(`ALTER TABLE subscriptions DROP COLUMN traffic_json; PRAGMA user_version = 3;`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s = openTestStore(t, path)
+	assertTestState(t, s, State{Generation: 7, Subscriptions: []Subscription{sub}})
+	assertDiagnostics(t, s, map[string]Diagnostics{id: testDiagnostics()})
+	var version int
+	if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 4 {
+		t.Fatalf("schema version=%d error=%v", version, err)
+	}
+	var traffic sql.NullString
+	if err := s.db.QueryRow("SELECT traffic_json FROM subscriptions WHERE id = ?", sub.ID).Scan(&traffic); err != nil || traffic.Valid {
+		t.Fatalf("migrated subscription traffic=%v error=%v", traffic, err)
+	}
+}

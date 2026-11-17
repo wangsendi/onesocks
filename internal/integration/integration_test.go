@@ -58,7 +58,7 @@ func startShadowsocks(t *testing.T) string {
 }
 
 func TestAPIToSOCKSToSingBoxAndRefresh(t *testing.T) {
-	for _, format := range []string{"URI", "Clash"} {
+	for _, format := range []string{"URI", "Clash", "Surge", "V2RayJSON", "V2RayBase64URI"} {
 		t.Run(format, func(t *testing.T) { testAPIToSOCKSToSingBoxAndRefresh(t, format) })
 	}
 }
@@ -68,11 +68,23 @@ func testAPIToSOCKSToSingBoxAndRefresh(t *testing.T, format string) {
 	credential := base64.RawStdEncoding.EncodeToString([]byte("aes-128-gcm:integration-secret"))
 	var body atomic.Value
 	fixture := func(name string) string {
-		if format == "Clash" {
-			host, port, _ := net.SplitHostPort(remote)
+		host, port, _ := net.SplitHostPort(remote)
+		uri := "ss://" + credential + "@" + remote + "#" + name
+		switch format {
+		case "URI":
+			return uri
+		case "Clash":
 			return fmt.Sprintf("proxies:\n- {name: %q, type: ss, server: %q, port: %s, cipher: aes-128-gcm, password: integration-secret, udp: true}\n", name, host, port)
+		case "Surge":
+			return fmt.Sprintf("[General]\nloglevel = notify\n\n[Proxy]\n%s = ss, %s, %s, encrypt-method=aes-128-gcm, password=integration-secret\n\n[Proxy Group]\n代理选择 = select, %s\n\n[Rule]\nFINAL,代理选择\n", name, host, port, name)
+		case "V2RayJSON":
+			return fmt.Sprintf(`{"outbounds":[{"tag":%q,"protocol":"shadowsocks","settings":{"servers":[{"address":%q,"port":%s,"method":"aes-128-gcm","password":"integration-secret"}]}}]}`, name, host, port)
+		case "V2RayBase64URI":
+			return base64.StdEncoding.EncodeToString([]byte(uri + "\n"))
+		default:
+			t.Fatalf("unsupported subscription fixture format %q", format)
+			return ""
 		}
-		return "ss://" + credential + "@" + remote + "#" + name
 	}
 	body.Store(fixture("香港01"))
 	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, body.Load().(string)) }))

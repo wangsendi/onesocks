@@ -20,10 +20,13 @@ OneSocks 使用 Go 编写，内嵌 Web 管理界面和 sing-box 协议引擎，�
 - 检测 HTTP 延迟、出口 IP、位置和 IP 风险，支持共享并发上限及流式批量检测。
 - 搜索、组合筛选、排序、分页，导出 CSV、SOCKS5 链接或 JSON。
 - 使用 SQLite 保存订阅、节点及检测结果，重启后恢复。
+- 服务商提供信息时，显示订阅已用流量、剩余额度和到期时间。
 
-订阅支持 **Clash / Mihomo YAML、sing-box JSON、URI 列表和 Base64 编码的订阅**。支持的节点协议包括 **Shadowsocks、VLESS、VMess、Trojan、Hysteria2 和 AnyTLS**，以及相应协议的 TLS、Reality、WebSocket 和 gRPC 配置。Clash 订阅导入 `proxies` 节点列表，兼容 proxy-provider 节点文件及 JSON 格式的 Clash 配置。直接将 HTTP(S) 订阅链接填入管理界面或现有订阅 API 即可，无需手动选择格式。
+订阅支持 **Clash / Mihomo YAML、Surge 配置、sing-box JSON、V2Ray / Xray JSON、URI 列表和 Base64 编码的订阅**。支持的节点协议包括 **Shadowsocks、VLESS、VMess、Trojan、Hysteria2 和 AnyTLS**，以及相应协议的 TLS、Reality、WebSocket 和 gRPC 配置。直接将 HTTP(S) 订阅链接填入管理界面或现有订阅 API 即可，无需手动选择格式。
 
 Clash 导入覆盖上述协议，支持 TCP / WebSocket / gRPC、TLS / Reality、WebSocket early data 和 HTTP upgrade，以及 Shadowsocks 的 `obfs` / `v2ray-plugin` 插件。不支持的协议或选项会跳过并返回提示；没有有效节点时导入失败，刷新失败会保留之前的节点。不导入策略组、规则、DNS 设置、链式出站，也不递归拉取 `proxy-providers`。若配置只有 provider 引用，请直接添加 provider 的订阅 URL。
+
+Surge 导入 `[Proxy]` 段或独立节点列表，支持带引号的参数和注释，覆盖 Shadowsocks、VMess、VLESS、Trojan、Hysteria2 和 AnyTLS；其他配置段及 `#!include` 文件不导入。V2Ray / Xray 支持完整 JSON 配置、单个出站及多配置数组中的 Shadowsocks、VMess、VLESS、Trojan 节点，也兼容 V2RayN、V2RayNG 使用的 URI 订阅。不支持的传输或协议选项会返回提示。
 
 ## 快速开始
 
@@ -127,6 +130,7 @@ socks_password: ""
 api_token: ""
 probe_concurrency: 16
 outbound_interface: ""
+node_ip_preference: auto
 ```
 
 | 配置项 | 默认值 | 说明 |
@@ -138,6 +142,7 @@ outbound_interface: ""
 | `api_token` | 空 | API Bearer 令牌；留空关闭 API 鉴权 |
 | `probe_concurrency` | `16` | 正整数；单节点和所有批量检测共享的并发上限 |
 | `outbound_interface` | 空 | 出站网卡；留空使用系统路由 |
+| `node_ip_preference` | `auto` | 代理节点入口地址优先级：`auto`、`ipv4` 或 `ipv6` |
 
 相对路径以工作目录为基准，修改配置后需重启。设置 `api_token` 后，管理界面需要输入令牌，API 请求需要携带认证头：
 
@@ -149,6 +154,8 @@ curl -H 'Authorization: Bearer YOUR_TOKEN' http://127.0.0.1:8080/api/nodes
 
 `outbound_interface` 用于节点连接、节点 DNS 解析和订阅下载。与 TUN 客户端共存时，可按需指定实际物理网卡，例如 `eth0`。接口绑定取决于系统权限和路由；若 DNS 返回 Fake-IP 地址，还需调整 DNS 或添加排除规则。
 
+设置 `node_ip_preference: ipv4` 或 `ipv6`，通过域名连接代理服务器时优先使用对应地址族，并保留另一地址族作为回退。节点直接填写 IP 地址时不改变地址；`auto` 保留原有解析行为和节点自带偏好。修改后需要重启。此选项控制本机到代理节点的入口连接，不影响订阅下载，也不决定代理访问目标网站时使用的出口 IP。
+
 ## 检测和导出
 
 **HTTP 延迟**通过所选节点向 Cloudflare 发送 HEAD 请求，优先记录复用连接后的第二次响应耗时。**IP 检测**通过节点请求 [iplogs](https://iplogs.com/)，获取出口 IP、位置、网络信息及风险证据。评分范围为 0–1，数值越高表示代理使用证据越强。
@@ -156,6 +163,8 @@ curl -H 'Authorization: Bearer YOUR_TOKEN' http://127.0.0.1:8080/api/nodes
 这些是诊断功能，**不是上传/下载测速**。检测使用 TCP，也不能据此判断 UDP 是否可用。
 
 批量检测和导出作用于**筛选后的全部节点**，包含其他分页的结果。共享并发上限默认为 16，超出部分进入可取消的队列。结果按完成顺序返回，单个节点失败不影响其余节点。关闭批量请求会取消运行中及排队中的任务。检测结果保存到 SQLite；节点出站配置发生变化时会清除旧结果。
+
+**补测 IP** 只检测当前筛选范围内未检测或上次 IP 检测失败的节点，按钮数量包含其他分页。已有成功 IP 结果的节点会跳过，新增订阅后无需重新检测全部节点。
 
 ## HTTP API
 
@@ -183,7 +192,24 @@ curl -N -X POST http://127.0.0.1:8080/api/nodes/probe \
 
 `kind` 可选 `latency` 或 `ip-check`。每行包含 `id` 及 `node` 或 `error`；检测失败原因也可能保存在 `node.latency.error` 或 `node.ip_check.error` 中。延迟检测限时 5 秒，IP 检测 40 秒，每次流式写入最多等待 30 秒。批量流不受普通 API 的 3 分钟总时限限制。
 
-订阅默认每 6 小时刷新，URL 的片段标签在保存和请求前移除。刷新失败时保留上次成功的节点。启动时先恢复保存的节点，再在后台刷新订阅。
+订阅默认每 6 小时刷新，URL 的片段标签在保存和请求前移除。刷新失败时保留上次成功的节点。重启时恢复已保存的节点和检测结果，不强制刷新订阅。定时刷新仍以各订阅保存的上次尝试时间计算；已到期的订阅会在下一次定时检查时刷新，也可手动刷新。
+
+订阅请求默认使用 `OneSocks/<version>`。如果服务商返回 HTTP 403，会在同一次抓取超时内使用 `User-Agent: sing-box` 重试一次，兼容仅接受已知代理客户端的订阅服务。
+
+每次成功拉取订阅时，从服务商返回的 `Subscription-Userinfo` 响应头读取流量和到期时间。剩余流量按 `总额 - 上传 - 下载` 计算，最低显示为 0；界面使用二进制单位（1 GiB = 1024³ 字节）。这些数据是服务商在上次成功刷新时提供的账户统计，不是 OneSocks 实时转发计数。缺失或无效字段显示为未提供，总额缺失或为 0 时不会推断为无限流量。刷新失败保留上次统计。
+
+`GET /api/subscriptions` 的列表项可包含 `traffic` 对象：
+
+```json
+{
+  "upload_bytes": 1073741824,
+  "download_bytes": 41875931136,
+  "total_bytes": 214748364800,
+  "expires_at": "2027-01-01T00:00:00Z"
+}
+```
+
+流量统计保存到 SQLite，重启后恢复。现有数据库自动升级，保留节点和检测结果；已有订阅在下次定时或手动刷新成功后获取统计。
 
 ## TCP、UDP 与 QUIC
 

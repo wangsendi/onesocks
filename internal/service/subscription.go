@@ -166,6 +166,13 @@ func (m *Manager) fetch(ctx context.Context, sub *store.Subscription) ([]string,
 	}
 	req.Header.Set("User-Agent", "OneSocks/"+m.options.Version)
 	resp, err := m.client.Do(req)
+	if err == nil && resp.StatusCode == http.StatusForbidden {
+		// Some providers only serve subscriptions to recognized proxy clients.
+		_ = resp.Body.Close()
+		req = req.Clone(ctx)
+		req.Header.Set("User-Agent", "sing-box")
+		resp, err = m.client.Do(req)
+	}
 	if err != nil {
 		return nil, coded("fetch_failed", "subscription fetch failed: "+err.Error())
 	}
@@ -197,6 +204,7 @@ func (m *Manager) fetch(ctx context.Context, sub *store.Subscription) ([]string,
 	sub.LastAttemptAt = &now
 	sub.LastSuccessAt = &now
 	sub.LastError = ""
+	sub.Traffic = parseSubscriptionTraffic(resp.Header.Values("Subscription-Userinfo"))
 	return result.Warnings, nil
 }
 
@@ -213,7 +221,7 @@ func (m *Manager) recordFailure(s store.State, i int, err error) {
 }
 
 func info(sub store.Subscription) domain.SubscriptionInfo {
-	return domain.SubscriptionInfo{ID: sub.ID, Name: sub.Name, URL: sub.URL, RefreshInterval: sub.RefreshInterval, LastAttemptAt: sub.LastAttemptAt, LastSuccessAt: sub.LastSuccessAt, LastError: sub.LastError, NodeCount: len(sub.Nodes), Stale: sub.LastError != ""}
+	return domain.SubscriptionInfo{ID: sub.ID, Name: sub.Name, URL: sub.URL, RefreshInterval: sub.RefreshInterval, LastAttemptAt: sub.LastAttemptAt, LastSuccessAt: sub.LastSuccessAt, LastError: sub.LastError, NodeCount: len(sub.Nodes), Stale: sub.LastError != "", Traffic: sub.Traffic.Clone()}
 }
 
 func (m *Manager) Subscriptions() []domain.SubscriptionInfo {
@@ -226,10 +234,9 @@ func (m *Manager) Subscriptions() []domain.SubscriptionInfo {
 	return items
 }
 
-// Start refreshes cached subscriptions on startup, then checks due times.
+// Start schedules refreshes using the persisted last attempt times.
 func (m *Manager) Start() {
 	m.background.Go(func() {
-		m.refreshDue(time.Time{})
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
 		for {
@@ -243,14 +250,13 @@ func (m *Manager) Start() {
 	})
 }
 
-// A zero time refreshes every cached subscription on startup.
 func (m *Manager) refreshDue(now time.Time) {
 	for _, sub := range m.current().Subscriptions {
 		interval, err := time.ParseDuration(sub.RefreshInterval)
 		if err != nil {
 			interval = m.options.RefreshInterval
 		}
-		if !now.IsZero() && sub.LastAttemptAt != nil && now.Sub(*sub.LastAttemptAt) < interval {
+		if sub.LastAttemptAt != nil && now.Sub(*sub.LastAttemptAt) < interval {
 			continue
 		}
 		if _, err := m.Refresh(m.ctx, sub.ID); err != nil && m.ctx.Err() == nil {

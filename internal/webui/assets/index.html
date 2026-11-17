@@ -76,7 +76,7 @@
                 <div><label for="score-max-filter">评分上限</label><input id="score-max-filter" type="number" min="0" max="1" step="0.01" placeholder="不限" inputmode="decimal"></div>
               </div>
               <div class="table-actions">
-                <div class="probe-toolbar-actions"><button id="latency-all" class="button secondary" type="button">批量延迟探测</button><button id="ip-all" class="button secondary" type="button">批量 IP 检测</button><button id="probe-stop" class="text-button" type="button" hidden>停止检测</button></div>
+                <div class="probe-toolbar-actions"><button id="latency-all" class="button secondary" type="button">批量延迟探测</button><button id="ip-all" class="button secondary" type="button">批量 IP 检测</button><button id="ip-missing" class="button secondary" type="button" title="只检测当前筛选范围内未检测或上次失败的节点，包含其他分页">补测 IP</button><button id="probe-stop" class="text-button" type="button" hidden>停止检测</button></div>
                 <div class="table-order"><button id="filters-reset" class="text-button" type="button" disabled>重置</button><label class="sr-only" for="node-sort">节点排序</label><select id="node-sort"><option value="">默认排序</option><option value="name">名称排序</option><option value="latency-asc">延迟从低到高</option><option value="latency-desc">延迟从高到低</option><option value="score-asc">评分从低到高</option><option value="score-desc">评分从高到低</option></select></div>
               </div>
               <div class="list-meta"><span id="node-results">加载中…</span><span id="probe-progress" role="status"></span><span id="last-sync"></span></div>
@@ -95,7 +95,7 @@
         <section id="subscriptions-panel" class="list-panel subscription-panel" aria-label="订阅管理" data-screen="free" data-ui hidden>
           <div class="section-intro"><div><h2>订阅来源</h2></div><span id="subscription-results" class="muted"></span></div>
           <div id="subscriptions-content" class="data-surface" aria-busy="false">
-            <table class="subscription-table"><thead><tr><th scope="col">订阅</th><th scope="col">节点</th><th scope="col">同步状态</th><th scope="col" class="actions-heading">操作</th></tr></thead><tbody id="subscriptions-body"></tbody></table>
+            <table class="subscription-table"><thead><tr><th scope="col">订阅</th><th scope="col">节点</th><th scope="col">流量 / 到期</th><th scope="col">同步状态</th><th scope="col" class="actions-heading">操作</th></tr></thead><tbody id="subscriptions-body"></tbody></table>
             <div id="subscriptions-empty" class="empty-state" hidden><span class="empty-icon"><svg class="icon" aria-hidden="true"><use href="#icon-link"/></svg></span><h2>还没有订阅</h2><button id="subscriptions-empty-add" class="button primary" type="button">添加订阅</button></div>
           </div>
         </section>

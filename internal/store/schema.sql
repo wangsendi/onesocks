@@ -12,7 +12,8 @@ CREATE TABLE subscriptions (
     refresh_interval  TEXT NOT NULL,
     last_attempt_at   TEXT,
     last_success_at   TEXT,
-    last_error        TEXT NOT NULL DEFAULT ''
+    last_error        TEXT NOT NULL DEFAULT '',
+    traffic_json      TEXT
 );
 
 CREATE TABLE nodes (
@@ -25,4 +26,4 @@ CREATE TABLE nodes (
     UNIQUE (subscription_id, name)
 );
 
-PRAGMA user_version = 3;
+PRAGMA user_version = 4;

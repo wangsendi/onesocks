@@ -28,7 +28,7 @@ func parseJSON(data []byte) (domain.ParseResult, error) {
 			if json.Unmarshal(raw, &entries) != nil {
 				return result, errors.New("invalid outbounds list")
 			}
-		} else if _, ok := doc["type"]; ok {
+		} else if doc["type"] != nil || doc["protocol"] != nil {
 			entries = []json.RawMessage{data}
 		} else {
 			return result, errors.New("JSON has no outbounds")
@@ -41,6 +41,38 @@ func parseJSON(data []byte) (domain.ParseResult, error) {
 		if err != nil {
 			err = errors.New("invalid outbound object")
 		} else {
+			if _, ok := obj["outbounds"]; ok {
+				nested, nestedErr := parseJSON(entry)
+				prefix := text(obj["remarks"])
+				if prefix == "" {
+					prefix = text(obj["name"])
+				}
+				if prefix == "" {
+					prefix = fmt.Sprintf("config-%d", i+1)
+				}
+				for _, node := range nested.Nodes {
+					node.Name = prefix + "-" + node.Name
+					result.Nodes = append(result.Nodes, node)
+				}
+				for _, warning := range nested.Warnings {
+					result.Warnings = append(result.Warnings, fmt.Sprintf("entry %d: %s", i+1, warning))
+				}
+				if nestedErr != nil {
+					result.Warnings = append(result.Warnings, fmt.Sprintf("entry %d: %s", i+1, nestedErr))
+				}
+				continue
+			}
+			if _, ok := obj["protocol"]; ok {
+				nodes, warnings, convertErr := v2rayNodes(entry)
+				result.Nodes = append(result.Nodes, nodes...)
+				for _, warning := range warnings {
+					result.Warnings = append(result.Warnings, fmt.Sprintf("entry %d: %s", i+1, warning))
+				}
+				if convertErr != nil {
+					result.Warnings = append(result.Warnings, fmt.Sprintf("entry %d: %s", i+1, convertErr))
+				}
+				continue
+			}
 			name := text(obj["tag"])
 			delete(obj, "tag")
 			delete(obj, "name")

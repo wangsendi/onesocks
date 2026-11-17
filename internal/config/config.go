@@ -21,13 +21,14 @@ type Config struct {
 	SOCKSPassword     string `yaml:"socks_password" json:"socks_password"`
 	APIToken          string `yaml:"api_token" json:"api_token"`
 	OutboundInterface string `yaml:"outbound_interface" json:"outbound_interface"`
+	NodeIPPreference  string `yaml:"node_ip_preference" json:"node_ip_preference"`
 	ProbeConcurrency  int    `yaml:"probe_concurrency" json:"probe_concurrency"`
 }
 
 func Default() Config {
 	return Config{
 		SOCKSListen: "127.0.0.1:1080", APIListen: "127.0.0.1:8080", DataDir: "data",
-		ProbeConcurrency: DefaultProbeConcurrency,
+		ProbeConcurrency: DefaultProbeConcurrency, NodeIPPreference: "auto",
 	}
 }
 
@@ -73,6 +74,11 @@ func Load(path string) (Config, error) {
 }
 
 func (c Config) Validate() error {
+	switch c.NodeIPPreference {
+	case "", "auto", "ipv4", "ipv6":
+	default:
+		return fmt.Errorf("node_ip_preference must be auto, ipv4 or ipv6")
+	}
 	if c.ProbeConcurrency <= 0 {
 		return fmt.Errorf("probe_concurrency must be positive")
 	}

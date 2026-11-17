@@ -53,7 +53,7 @@ func run() error {
 		FetchTimeout: 30 * time.Second, RefreshInterval: 6 * time.Hour,
 		DrainTimeout: 5 * time.Minute,
 		Factory: func(ctx context.Context, nodes []engine.Node) (engine.Engine, error) {
-			return singbox.NewWithOptions(ctx, nodes, singbox.Options{OutboundInterface: cfg.OutboundInterface})
+			return singbox.NewWithOptions(ctx, nodes, singbox.Options{OutboundInterface: cfg.OutboundInterface, NodeIPPreference: cfg.NodeIPPreference})
 		},
 		Version: version,
 	})
@@ -92,7 +92,7 @@ func run() error {
 	go func() { apiDone <- httpServer.Serve(apiListener) }()
 	go func() { socksDone <- socksServer.Serve(socksCtx, socksListener) }()
 	manager.Start()
-	slog.Info("onesocks started", "socks", socksListener.Addr(), "api", apiListener.Addr(), "outbound_interface", cfg.OutboundInterface, "version", version)
+	slog.Info("onesocks started", "socks", socksListener.Addr(), "api", apiListener.Addr(), "outbound_interface", cfg.OutboundInterface, "node_ip_preference", cfg.NodeIPPreference, "version", version)
 
 	signalCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()

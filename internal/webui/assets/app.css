@@ -182,10 +182,12 @@ tbody tr:last-child td { border-bottom: 0; }
 .section-intro { display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 3px 0 22px; }
 .section-intro h2 { font-size: 15px; color: var(--ink); }
 .section-intro > span { font-size: 11px; }
-.subscription-table th:first-child { width: 35%; }
-.subscription-table th:nth-child(2) { width: 9%; }
-.subscription-table th:nth-child(3) { width: 30%; }
-.subscription-table th:last-child { width: 26%; }
+.subscription-table th:first-child { width: 28%; }
+.subscription-table th:nth-child(2) { width: 64px; white-space: nowrap; }
+.subscription-table th:nth-child(3) { width: 26%; }
+.subscription-table th:nth-child(4) { width: 22%; }
+.subscription-table th:last-child { width: 17%; }
+.subscription-traffic { font-variant-numeric: tabular-nums; }
 .subscription-url { overflow-wrap: anywhere; font: 11px/1.7 ui-monospace, SFMono-Regular, Consolas, monospace; color: var(--muted); }
 .sync-state { display: inline-flex; align-items: center; gap: 5px; color: #5f7f42; font-size: 11px; }
 .sync-state::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: #adcb91; }
@@ -349,7 +351,7 @@ dialog::backdrop { background: #26391b40; }
   .subscription-table td { min-width: 0; padding: 0; border: 0; }
   .subscription-table td:nth-child(2) { text-align: right; font-size: 19px; color: var(--ink); }
   .subscription-table td:nth-child(2)::after { content: " 个节点"; display: block; color: var(--muted); font-size: 9px; }
-  .subscription-table td:nth-child(3), .subscription-table td:nth-child(4) { grid-column: 1 / -1; }
+  .subscription-table td:nth-child(n+3) { grid-column: 1 / -1; }
   .subscription-table .row-actions { justify-content: stretch; gap: 8px; }
   .subscription-table .row-actions button { flex: 1; min-height: 38px; }
   .section-intro { align-items: flex-start; padding-bottom: 8px; gap: 12px; }

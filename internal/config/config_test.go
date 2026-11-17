@@ -21,7 +21,7 @@ func TestDefaultAndOverrides(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.SOCKSListen != "127.0.0.1:1080" || c.APIListen != "127.0.0.1:8080" || c.DataDir != "data" || c.ProbeConcurrency != 16 {
+	if c.SOCKSListen != "127.0.0.1:1080" || c.APIListen != "127.0.0.1:8080" || c.DataDir != "data" || c.ProbeConcurrency != 16 || c.NodeIPPreference != "auto" {
 		t.Fatalf("defaults: %#v", c)
 	}
 	c, err = loadText(t, "api_listen: '[::1]:8081'\ndata_dir: custom\noutbound_interface: eth0\nprobe_concurrency: 3\n")
@@ -47,11 +47,21 @@ func TestInvalidConfig(t *testing.T) {
 	for _, text := range []string{
 		"api_listen: [\n", "data_dir: ''\n", "socks_listen: 'missing-port'\n",
 		"probe_concurrency: 0\n", "probe_concurrency: -1\n", "probe_concurrency: 1.5\n",
+		"node_ip_preference: ipv5\n", "node_ip_preference: ipv6_only\n",
 		"api_listen: '127.0.0.1:8080'\n---\napi_token: secret\n",
 		"socks_listen: '127.0.0.1:1080'\nsocks_listen: '127.0.0.1:1081'\n",
 	} {
 		if _, err := loadText(t, text); err == nil {
 			t.Errorf("accepted invalid config %q", text)
+		}
+	}
+}
+
+func TestNodeIPPreferences(t *testing.T) {
+	for _, preference := range []string{"auto", "ipv4", "ipv6"} {
+		c, err := loadText(t, "node_ip_preference: "+preference+"\n")
+		if err != nil || c.NodeIPPreference != preference {
+			t.Fatalf("preference=%q config=%+v error=%v", preference, c, err)
 		}
 	}
 }

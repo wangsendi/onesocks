@@ -15,15 +15,18 @@ OneSocks is a single Go binary with an embedded Web UI, a sing-box protocol engi
 ## Features
 
 - Manage multiple subscriptions with scheduled and manual refreshes.
+- Show subscription traffic usage, remaining quota, and expiry when supplied by the provider.
 - Select a node by its stable ID or unique full name, using a single SOCKS5 port.
 - Forward TCP and SOCKS5 UDP, including QUIC / HTTP/3 when the client and upstream node support UDP.
 - Probe HTTP latency, exit IP, location, and IP risk, with a shared concurrency limit and streamed batch results.
 - Search, filter, sort, paginate, and export nodes as CSV, SOCKS5 links, or JSON.
 - Keep subscriptions, nodes, and probe results across restarts in SQLite.
 
-Supported imports: **Clash / Mihomo YAML**, **sing-box JSON**, **URI lists**, and **Base64-encoded subscriptions**. Supported node protocols include **Shadowsocks, VLESS, VMess, Trojan, Hysteria2, and AnyTLS**, with TLS, Reality, WebSocket, and gRPC where applicable. Clash subscriptions import the `proxies` list, including proxy-provider files; JSON-encoded Clash documents also work. Paste the HTTP(S) subscription URL into the Web UI or the existing subscription API—no format selection is needed.
+Supported imports: **Clash / Mihomo YAML**, **Surge profiles**, **sing-box JSON**, **V2Ray / Xray JSON**, **URI lists**, and **Base64-encoded subscriptions**. Supported node protocols include **Shadowsocks, VLESS, VMess, Trojan, Hysteria2, and AnyTLS**, with TLS, Reality, WebSocket, and gRPC where applicable. Paste the HTTP(S) subscription URL into the Web UI or the existing subscription API—no format selection is needed.
 
 Clash imports cover the protocols above, TCP / WebSocket / gRPC transports, TLS / Reality, WebSocket early data and HTTP upgrade, and the `obfs` / `v2ray-plugin` Shadowsocks plugins. Unsupported protocols or options are skipped with warnings; if no valid nodes remain, the import fails and a refresh preserves the previous nodes. Proxy groups, rules, DNS settings, chained outbounds, and nested `proxy-providers` are not imported. For a configuration containing only provider references, add the provider’s subscription URL directly.
+
+Surge imports read the `[Proxy]` section or a standalone policy list, including quoted values and comments. Supported protocols are Shadowsocks, VMess, VLESS, Trojan, Hysteria2, and AnyTLS. Other sections and `#!include` files are not imported. V2Ray / Xray imports accept full JSON configurations, individual outbounds, and configuration arrays for Shadowsocks, VMess, VLESS, and Trojan; URI subscriptions used by V2RayN and V2RayNG are also supported. Unsupported transports or protocol features are reported as warnings.
 
 ## Quick start
 
@@ -127,6 +130,7 @@ socks_password: ""
 api_token: ""
 probe_concurrency: 16
 outbound_interface: ""
+node_ip_preference: auto
 ```
 
 | Setting | Default | Meaning |
@@ -138,6 +142,7 @@ outbound_interface: ""
 | `api_token` | empty | API Bearer token; empty disables API authentication |
 | `probe_concurrency` | `16` | Positive integer; shared limit across individual and batch probes |
 | `outbound_interface` | empty | Bind outbound connections to an interface; empty uses system routing |
+| `node_ip_preference` | `auto` | Proxy server address preference: `auto`, `ipv4`, or `ipv6` |
 
 Relative paths are resolved from the working directory. Config changes require a restart. With `api_token` set, sign in to the Web UI with the token and add this header to API calls:
 
@@ -149,6 +154,8 @@ The UI and API return full subscription URLs, outbound configurations, and servi
 
 `outbound_interface` applies to node connections, node DNS lookups, and subscription downloads. When running beside a TUN client, choose your physical interface, such as `eth0`, if needed. Interface binding depends on OS permissions and routing; a DNS server returning Fake-IP addresses may also require DNS exclusions or changes.
 
+Set `node_ip_preference: ipv4` or `ipv6` to prefer that address family when connecting to a proxy server by hostname. The other family remains available as a fallback; literal IP server addresses are unchanged. `auto` preserves the existing resolver behavior and any preference in the imported node. Restart after changing this setting. It affects the connection to the proxy server, not subscription downloads or the proxy's choice of exit IP when reaching a destination website.
+
 ## Probes and exports
 
 **HTTP latency** sends HEAD requests through the selected node to Cloudflare, preferring the second request over a reused connection. **IP checks** query [iplogs](https://iplogs.com/) through the node for exit IP, location, network details, and risk evidence. Risk scores range from 0 to 1; higher values indicate stronger evidence of proxy use.
@@ -156,6 +163,8 @@ The UI and API return full subscription URLs, outbound configurations, and servi
 These are diagnostic checks, **not upload/download speed tests**. They use TCP and do not establish UDP availability.
 
 Batch probes and exports apply to **all filtered nodes**, including other pages. The shared concurrency limit defaults to 16; excess work waits in a cancellable queue. Results arrive as each node finishes, and a failed node does not stop the rest. Closing the batch request cancels its running and queued work. Results are saved to SQLite and cleared when a node's outbound configuration changes.
+
+Use **补测 IP** to check only untested nodes and previous IP-check failures within the current filters. Its count includes other pages. Nodes with successful saved IP results are skipped, so adding a subscription does not require checking every node again.
 
 ## HTTP API
 
@@ -183,7 +192,24 @@ curl -N -X POST http://127.0.0.1:8080/api/nodes/probe \
 
 `kind` is `latency` or `ip-check`. Each line contains `id` and either `node` or `error`; probe failures can also appear in `node.latency.error` or `node.ip_check.error`. Latency probes have a 5-second limit, IP probes 40 seconds, and each stream write 30 seconds. Batch streams are exempt from the normal 3-minute API deadline.
 
-Subscriptions refresh every 6 hours unless configured otherwise. URL fragments are removed before storage and fetching. Failed refreshes preserve the last successful nodes. On startup, saved nodes are restored before subscriptions refresh in the background.
+Subscriptions refresh every 6 hours unless configured otherwise. URL fragments are removed before storage and fetching. Failed refreshes preserve the last successful nodes. Restarting restores saved nodes and probe results without forcing a subscription refresh. Scheduled refreshes continue from each subscription's saved last attempt time; overdue subscriptions refresh on the next scheduler tick. Manual refresh remains available.
+
+Subscription requests identify as `OneSocks/<version>`. If a provider returns HTTP 403, OneSocks retries once with `User-Agent: sing-box`, within the same fetch timeout, for providers that require a recognized proxy client.
+
+The subscription list reads the provider's `Subscription-Userinfo` response header on a successful subscription fetch. Remaining traffic is `total - upload - download`, clamped to zero. The UI uses binary units (1 GiB = 1024³ bytes); these are the provider's account statistics as of the last successful refresh, not live OneSocks transfer counters. Missing or invalid fields are shown as unavailable; a missing or zero total does not imply unlimited traffic. Refresh failures retain the previous statistics.
+
+`GET /api/subscriptions` includes an optional `traffic` object on each item:
+
+```json
+{
+  "upload_bytes": 1073741824,
+  "download_bytes": 41875931136,
+  "total_bytes": 214748364800,
+  "expires_at": "2027-01-01T00:00:00Z"
+}
+```
+
+Traffic statistics are saved in SQLite and restored after restart. Existing databases upgrade automatically without losing nodes or probe results. Existing subscriptions obtain statistics on their next successful scheduled or manual refresh.
 
 ## TCP, UDP, and QUIC
 

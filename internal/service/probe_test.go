@@ -364,7 +364,7 @@ func TestProbeResultsAndFailuresSurviveManagerRestart(t *testing.T) {
 	}))
 	defer server.Close()
 	var fail atomic.Bool
-	m, _, subID := newProbeManager(t, func(ctx context.Context, _ string, network, _ string) (net.Conn, error) {
+	m, feed, subID := newProbeManager(t, func(ctx context.Context, _ string, network, _ string) (net.Conn, error) {
 		if fail.Load() {
 			return nil, errors.New("selected proxy is unavailable")
 		}
@@ -393,6 +393,32 @@ func TestProbeResultsAndFailuresSurviveManagerRestart(t *testing.T) {
 	t.Cleanup(func() { _ = restarted.Close() })
 	if got := restarted.Nodes(""); !reflect.DeepEqual(got, want) {
 		t.Fatalf("diagnostics changed across restart: got=%+v want=%+v", got, want)
+	}
+	feed.set(document(ssNode("first", 2001), ssNode("second", 2002)), http.StatusOK)
+	requested, proceed := feed.blockNext()
+	close(proceed)
+	restarted.Start()
+	select {
+	case <-requested:
+		t.Fatal("restart refreshed a subscription before its scheduled time")
+	case <-time.After(1100 * time.Millisecond):
+	}
+	if got := restarted.Nodes(""); !reflect.DeepEqual(got, want) {
+		t.Fatal("starting the scheduler changed saved nodes or diagnostics")
+	}
+	sub := restarted.Subscriptions()[0]
+	interval, err := time.ParseDuration(sub.RefreshInterval)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restarted.refreshDue(sub.LastAttemptAt.Add(interval))
+	select {
+	case <-requested:
+	default:
+		t.Fatal("subscription did not refresh when its saved interval elapsed")
+	}
+	if got := restarted.Nodes(""); got.Generation != want.Generation+1 || domain.EqualOutbound(got.Items[0].Outbound, want.Items[0].Outbound) {
+		t.Fatal("scheduled refresh did not publish updated nodes")
 	}
 }
 

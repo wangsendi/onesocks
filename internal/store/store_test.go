@@ -21,6 +21,9 @@ func TestSQLiteReopenPreservesSubscriptionsAndSettings(t *testing.T) {
 	success := attempt.Add(-time.Minute)
 	first.LastAttemptAt, first.LastSuccessAt = &attempt, &success
 	first.LastError = "previous refresh failed"
+	upload, download, total := uint64(1024), uint64(2048), uint64(1<<30)
+	expires := attempt.Add(30 * 24 * time.Hour).UTC()
+	first.Traffic = &domain.SubscriptionTraffic{UploadBytes: &upload, DownloadBytes: &download, TotalBytes: &total, ExpiresAt: &expires}
 	second := testSubscription("s_a", "Second")
 	second.Nodes = second.Nodes[:1]
 	if err := s.Put(ctx, 7, first); err != nil {
@@ -51,7 +54,7 @@ func TestSQLiteReopenPreservesSubscriptionsAndSettings(t *testing.T) {
 		"foreign_keys": 1,
 		"busy_timeout": 5000,
 		"synchronous":  2,
-		"user_version": 3,
+		"user_version": 4,
 	} {
 		var got int
 		if err := s.db.QueryRow("PRAGMA " + pragma).Scan(&got); err != nil {
